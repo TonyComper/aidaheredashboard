@@ -43,3 +43,10 @@ node_modules/
 .env.local
 node_modules/
 .env.local
+# Ignore backup/copy files
+*copy.tsx
+*copy.ts
+*backup.tsx
+*backup.ts
+*backup.js
+*copy.js
