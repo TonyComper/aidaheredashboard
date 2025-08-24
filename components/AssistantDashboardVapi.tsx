@@ -1,5 +1,6 @@
 // components/AssistantDashboardVapi.tsx
 "use client";
+
 import React, { useEffect, useMemo, useState } from "react";
 import {
   collection,
@@ -10,10 +11,10 @@ import {
   Timestamp,
   where,
 } from "firebase/firestore";
-import { app as firebaseApp } from "@/lib/firebase"; // ensure lib/firebase exports `app`
+import { app as firebaseApp } from "@/lib/firebase"; // lib/firebase must export { app }
 import dynamic from "next/dynamic";
 
-// Recharts (loaded client-side only to keep SSR happy)
+// Recharts (client-only)
 const ResponsiveContainer = dynamic(
   async () => (await import("recharts")).ResponsiveContainer,
   { ssr: false }
@@ -38,10 +39,10 @@ const CartesianGrid = dynamic(
   { ssr: false }
 );
 
-type CallListItem = {
+type CallRow = {
   id: string;
   assistantId: string;
-  startTime?: Timestamp | null; // Firestore timestamp
+  startTime?: Timestamp | null;
   endTime?: Timestamp | null;
   durationSeconds?: number | null;
   status?: string | null;
@@ -53,7 +54,7 @@ type CallListItem = {
 
 type ViewMode = "log" | "hourly";
 
-// ----------------- Date helpers & presets -----------------
+// ----------------- Local-time date helpers -----------------
 function startOfDay(d = new Date()) {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
 }
@@ -80,7 +81,7 @@ function endOfYear(d = new Date()) {
 
 const PRESETS = [
   { key: "today", label: "Today" },
-  { key: "yesterday", label: "Yesterday" }, // ← NEW
+  { key: "yesterday", label: "Yesterday" },
   { key: "this_month", label: "This Month" },
   { key: "last_month", label: "Last Month" },
   { key: "last_3_months", label: "Last 3 Months" },
@@ -182,7 +183,7 @@ export default function AssistantDashboardVapi({
 
   // Data + UI state
   const [loading, setLoading] = useState<boolean>(false);
-  const [rows, setRows] = useState<CallListItem[]>([]);
+  const [rows, setRows] = useState<CallRow[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   // Drawer
@@ -191,19 +192,25 @@ export default function AssistantDashboardVapi({
   // View switch
   const [view, setView] = useState<ViewMode>("log");
 
-  // Resolve the date range (JS Date for Firestore query)
+  // Resolve the date range (local time)
   const { start, end } = useMemo(() => {
     const cs = customStart ? new Date(customStart) : undefined;
     const ce = customEnd ? new Date(customEnd) : undefined;
     return resolveRange(preset, { start: cs, end: ce });
   }, [preset, customStart, customEnd]);
 
-  // Sync now → pull from Vapi to Firestore (server-side)
+  // Sync now → pull from Vapi to Firestore (server-side), for THIS window
   async function syncNow() {
-    const params = new URLSearchParams({ assistantId });
-    const res = await fetch(`/api/vapi/sync?${params}`, { method: "GET" });
-    // we intentionally ignore the response body; UI reload happens below
-    void loadData(); // refetch after sync
+    try {
+      const params = new URLSearchParams({
+        assistantId,
+        start: start.toISOString(),
+        end: end.toISOString(),
+      });
+      await fetch(`/api/vapi/sync?${params}`, { method: "GET" });
+    } finally {
+      void loadData(); // refresh table after sync
+    }
   }
 
   // Fetch from Firestore (client-side)
@@ -212,20 +219,19 @@ export default function AssistantDashboardVapi({
     setError(null);
     try {
       const db = getFirestore(firebaseApp);
-
       const col = collection(db, "callLogs");
-      // IMPORTANT: Firestore requires a composite index for this query.
-      // If you get "This query requires an index", click the link Firestore prints.
+
+      // Requires composite index: where(assistantId==), orderBy(startTime), where(startTime>=), where(startTime<=)
       const qy = query(
         col,
         where("assistantId", "==", assistantId),
+        orderBy("startTime", "desc"),
         where("startTime", ">=", Timestamp.fromDate(start)),
-        where("startTime", "<=", Timestamp.fromDate(end)),
-        orderBy("startTime", "desc")
+        where("startTime", "<=", Timestamp.fromDate(end))
       );
 
       const snap = await getDocs(qy);
-      const arr: CallListItem[] = snap.docs.slice(0, pageSize).map((d) => {
+      const arr: CallRow[] = snap.docs.slice(0, pageSize).map((d) => {
         const data = d.data() as Record<string, unknown>;
         return {
           id: d.id,
@@ -274,23 +280,19 @@ export default function AssistantDashboardVapi({
 
   // Hourly Analysis dataset
   const hourlyData = useMemo(() => {
-    // Bucket by hour label
     const map = new Map<string, number>();
     rows.forEach((r) => {
       const d = tsToDate(r.startTime);
       if (!d) return;
-      const label = d.toLocaleTimeString([], { hour: "2-digit" }); // "01 AM"
+      const label = d.toLocaleTimeString([], { hour: "2-digit" }); // e.g., "01 PM"
       map.set(label, (map.get(label) ?? 0) + 1);
     });
-    // Sort by hour in 24h to preserve order
+    // Preserve hour order
     const sorted = Array.from(map.entries())
       .map(([k, v]) => {
-        // Parse hour from k like "01 AM"/"13"
         const dt = new Date();
-        const parsed = new Date(
-          `${dt.toDateString()} ${k}`
-        ).getHours(); /* fallback if locale varies */
-        return { label: k, hour: parsed, calls: v };
+        const parsedHour = new Date(`${dt.toDateString()} ${k}`).getHours();
+        return { label: k, hour: parsedHour, calls: v };
       })
       .sort((a, b) => a.hour - b.hour)
       .map(({ label, calls }) => ({ label, calls }));
@@ -441,10 +443,7 @@ export default function AssistantDashboardVapi({
                   </tr>
                 ) : rows.length === 0 ? (
                   <tr>
-                    <td
-                      className="py-6 px-3 text-gray-400"
-                      colSpan={5}
-                    >
+                    <td className="py-6 px-3 text-gray-400" colSpan={5}>
                       No calls in this period.
                     </td>
                   </tr>
@@ -461,9 +460,7 @@ export default function AssistantDashboardVapi({
                         <td className="py-2 px-3 whitespace-nowrap text-sm">
                           {fmtDate(it.startTime)}
                         </td>
-                        <td className="py-2 px-3 text-sm">
-                          {it.from || "—"}
-                        </td>
+                        <td className="py-2 px-3 text-sm">{it.from || "—"}</td>
                         <td className="py-2 px-3 text-sm">
                           {fmtTime(it.startTime)}
                         </td>
