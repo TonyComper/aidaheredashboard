@@ -3,7 +3,7 @@
 import React from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/AuthProvider";
-import AssistantDashboard from "@/components/assistantdashboardvapi";
+import AssistantDashboard from "@/components/AssistantDashboardVapi";
 
 export default function DashboardPage() {
   const router = useRouter();

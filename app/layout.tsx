@@ -1,23 +1,17 @@
-// app/layout.tsx
-import "./globals.css";
-import type { Metadata } from "next";
-import dynamic from "next/dynamic";
+import React from 'react';
+import type { Metadata } from 'next';
+import { Providers } from './providers'; // <- client boundary
 
 export const metadata: Metadata = {
-  title: "AidaHereDashboard",
-  description: "Customer dashboard for your Vapi assistant",
+  title: 'AidaHere Dashboard',
+  description: 'Assistant dashboards',
 };
-
-// ⬇️ Load AuthProvider only on the client
-const ClientAuthProvider = dynamic(() => import("@/components/AuthProvider"), {
-  ssr: false,
-});
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <body>
-        <ClientAuthProvider>{children}</ClientAuthProvider>
+        <Providers>{children}</Providers>
       </body>
     </html>
   );
