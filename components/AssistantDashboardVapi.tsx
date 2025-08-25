@@ -11,7 +11,7 @@ import {
   Timestamp,
   where,
 } from "firebase/firestore";
-import { app as firebaseApp } from "@/lib/firebase"; // lib/firebase must export { app }
+import { app as firebaseApp } from "@/lib/firebase";
 import dynamic from "next/dynamic";
 
 // Recharts (client-only)
@@ -19,7 +19,11 @@ const ResponsiveContainer = dynamic(
   async () => (await import("recharts")).ResponsiveContainer,
   { ssr: false }
 );
-const LineChart = dynamic(async () => (await import("recharts")).LineChart, {
+const LineChart = dynamic(async () => (await import("recharts")).Line, {
+  // 👆 import "LineChart" from recharts as .LineChart actually (typo fix below)
+} as any) as unknown as typeof import("recharts").LineChart;
+// (Small TS shim because dynamic typing can be fussy on some setups)
+const _LineChart = dynamic(async () => (await import("recharts")).LineChart, {
   ssr: false,
 });
 const Line = dynamic(async () => (await import("recharts")).Line, {
@@ -149,6 +153,14 @@ function fmtTime(ts?: Timestamp | null) {
     : "—";
 }
 
+// ---- Hour label helpers (fixed 12AM → 11PM) ----
+const HOUR_LABELS = Array.from({ length: 24 }, (_, h) => {
+  const hour12 = ((h + 11) % 12) + 1; // 0 -> 12, 13 -> 1
+  const ampm = h < 12 ? "AM" : "PM";
+  return `${hour12} ${ampm}`;
+});
+HOUR_LABELS[0] = "12 AM"; // ensure midnight reads nicely
+
 function KpiCard({
   title,
   value,
@@ -186,6 +198,9 @@ export default function AssistantDashboardVapi({
   const [rows, setRows] = useState<CallRow[]>([]);
   const [error, setError] = useState<string | null>(null);
 
+  // Sync state
+  const [syncing, setSyncing] = useState<boolean>(false);
+
   // Drawer
   const [drawerId, setDrawerId] = useState<string | null>(null);
 
@@ -201,14 +216,23 @@ export default function AssistantDashboardVapi({
 
   // Sync now → pull from Vapi to Firestore (server-side), for THIS window
   async function syncNow() {
+    setSyncing(true);
     try {
       const params = new URLSearchParams({
         assistantId,
         start: start.toISOString(),
         end: end.toISOString(),
       });
-      await fetch(`/api/vapi/sync?${params}`, { method: "GET" });
+      const r = await fetch(`/api/vapi/sync?${params}`, { method: "GET" });
+      // Optional: if the route returns non-200, surface that
+      if (!r.ok) {
+        const t = await r.text().catch(() => "");
+        throw new Error(`Sync failed: ${r.status} ${t || ""}`);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Sync failed.");
     } finally {
+      setSyncing(false);
       void loadData(); // refresh table after sync
     }
   }
@@ -278,25 +302,19 @@ export default function AssistantDashboardVapi({
   );
   const avgMinutes = totalCalls ? totalMinutes / totalCalls : 0;
 
-  // Hourly Analysis dataset
+  // Hourly Analysis dataset — fixed order: 12 AM → 11 PM
   const hourlyData = useMemo(() => {
-    const map = new Map<string, number>();
+    const buckets = Array.from({ length: 24 }, () => 0);
     rows.forEach((r) => {
       const d = tsToDate(r.startTime);
       if (!d) return;
-      const label = d.toLocaleTimeString([], { hour: "2-digit" }); // e.g., "01 PM"
-      map.set(label, (map.get(label) ?? 0) + 1);
+      const h = d.getHours(); // local hour 0..23
+      buckets[h] += 1;
     });
-    // Preserve hour order
-    const sorted = Array.from(map.entries())
-      .map(([k, v]) => {
-        const dt = new Date();
-        const parsedHour = new Date(`${dt.toDateString()} ${k}`).getHours();
-        return { label: k, hour: parsedHour, calls: v };
-      })
-      .sort((a, b) => a.hour - b.hour)
-      .map(({ label, calls }) => ({ label, calls }));
-    return sorted;
+    return buckets.map((count, h) => ({
+      label: HOUR_LABELS[h],
+      calls: count,
+    }));
   }, [rows]);
 
   return (
@@ -342,12 +360,24 @@ export default function AssistantDashboardVapi({
 
       {/* Actions Row */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 mb-5">
-        <button
-          onClick={syncNow}
-          className="px-3 py-2 rounded-xl border bg-white hover:bg-gray-50"
-        >
-          Sync now
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={syncNow}
+            disabled={syncing}
+            className={`px-3 py-2 rounded-xl border bg-white hover:bg-gray-50 ${
+              syncing ? "opacity-60 cursor-not-allowed" : ""
+            }`}
+          >
+            Sync now
+          </button>
+          <span
+            className="text-sm text-gray-600"
+            aria-live="polite"
+            aria-busy={syncing}
+          >
+            {syncing && "SYNC in PROGRESS. Please wait…"}
+          </span>
+        </div>
 
         <div className="ml-auto flex items-center gap-2">
           <span className="text-sm text-gray-600">View</span>
@@ -393,9 +423,9 @@ export default function AssistantDashboardVapi({
           </div>
           <div style={{ width: "100%", height: 320 }}>
             <ResponsiveContainer>
-              <LineChart data={hourlyData}>
+              <_LineChart data={hourlyData}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="label" />
+                <XAxis dataKey="label" interval={1} />
                 <YAxis allowDecimals={false} />
                 <Tooltip />
                 <Line
@@ -405,7 +435,7 @@ export default function AssistantDashboardVapi({
                   strokeWidth={2}
                   dot={{ r: 2 }}
                 />
-              </LineChart>
+              </_LineChart>
             </ResponsiveContainer>
           </div>
         </div>
