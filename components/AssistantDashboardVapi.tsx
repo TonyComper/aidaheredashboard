@@ -53,7 +53,7 @@ type CallRow = {
   transcript?: string | null;
 };
 
-type ViewMode = "log" | "hourly" | "billing";
+type ViewMode = "log" | "hourly" | "billing" | "invoice";
 
 // ----------------- Local-time date helpers -----------------
 function startOfDay(d = new Date()) {
@@ -79,49 +79,20 @@ function startOfYear(d = new Date()) {
 function endOfYear(d = new Date()) {
   return new Date(d.getFullYear(), 11, 31, 23, 59, 59, 999);
 }
+function sameYearMonth(a: Date, b: Date) {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth();
+}
 
-const PRESETS = [
-  { key: "today", label: "Today" },
-  { key: "yesterday", label: "Yesterday" },
-  { key: "this_month", label: "This Month" },
-  { key: "last_month", label: "Last Month" },
-  { key: "last_3_months", label: "Last 3 Months" },
-  { key: "this_year", label: "This Year" },
-  { key: "custom", label: "Custom Range" },
-] as const;
-
-type PresetKey = (typeof PRESETS)[number]["key"];
-
-function resolveRange(
-  preset: PresetKey,
-  custom?: { start?: Date; end?: Date }
-) {
-  const now = new Date();
-  switch (preset) {
-    case "today":
-      return { start: startOfDay(now), end: endOfDay(now) };
-    case "yesterday": {
-      const y = new Date(now);
-      y.setDate(now.getDate() - 1);
-      return { start: startOfDay(y), end: endOfDay(y) };
-    }
-    case "this_month":
-      return { start: startOfMonth(now), end: endOfMonth(now) };
-    case "last_month": {
-      const prev = addMonths(now, -1);
-      return { start: startOfMonth(prev), end: endOfMonth(prev) };
-    }
-    case "last_3_months":
-      return { start: startOfMonth(addMonths(now, -2)), end: endOfMonth(now) };
-    case "this_year":
-      return { start: startOfYear(now), end: endOfYear(now) };
-    case "custom":
-    default:
-      return {
-        start: custom?.start ?? startOfMonth(now),
-        end: custom?.end ?? endOfDay(now),
-      };
+// Generate an array of month starts from A → B inclusive
+function monthRangeInclusive(from: Date, to: Date) {
+  const out: Date[] = [];
+  let cur = startOfMonth(from);
+  const end = startOfMonth(to);
+  while (cur <= end) {
+    out.push(new Date(cur));
+    cur = addMonths(cur, 1);
   }
+  return out;
 }
 
 // ----------------- Format helpers -----------------
@@ -155,6 +126,16 @@ function fmtTime(ts?: Timestamp | null) {
   return d
     ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
     : "—";
+}
+function fmtMonth(d: Date) {
+  return d.toLocaleString(undefined, { month: "long", year: "numeric" });
+}
+function parsePlanStartMonth(s?: string | null): Date | null {
+  if (!s) return null;
+  // Expect formats like "August 2025"
+  const d = new Date(s);
+  if (!isNaN(d.getTime())) return startOfMonth(d);
+  return null;
 }
 
 function KpiCard({
@@ -197,7 +178,7 @@ export default function AssistantDashboardVapi({
   pageSize?: number;
 }) {
   // Period + custom range
-  const [preset, setPreset] = useState<PresetKey>("today");
+  const [preset, setPreset] = useState<"today" | "yesterday" | "this_month" | "last_month" | "last_3_months" | "this_year" | "custom">("today");
   const [customStart, setCustomStart] = useState<string>("");
   const [customEnd, setCustomEnd] = useState<string>("");
 
@@ -225,7 +206,65 @@ export default function AssistantDashboardVapi({
   const [planOverageFee, setPlanOverageFee] = useState<number>(0);
   const [callsThisMonth, setCallsThisMonth] = useState<number>(0);
 
-  // Resolve the date range (local time)
+  // -------- INVOICE HISTORY --------
+  type InvoiceRow = {
+    month: string; // "August 2025"
+    planName: string;
+    planMonthlyFee: number;
+    planMonthlyCalls: number;
+    actualCalls: number;
+    callBalance: number; // remaining (can be negative)
+    callOverageFee: number;
+    calculatedOverage: number; // dollars
+    totalInvoice: number; // monthly fee + overage
+  };
+  const [invoiceLoading, setInvoiceLoading] = useState<boolean>(false);
+  const [invoiceError, setInvoiceError] = useState<string | null>(null);
+  const [invoiceRows, setInvoiceRows] = useState<InvoiceRow[]>([]);
+
+  // ----------------- Date range (local time) -----------------
+  const PRESETS = [
+    { key: "today", label: "Today" },
+    { key: "yesterday", label: "Yesterday" },
+    { key: "this_month", label: "This Month" },
+    { key: "last_month", label: "Last Month" },
+    { key: "last_3_months", label: "Last 3 Months" },
+    { key: "this_year", label: "This Year" },
+    { key: "custom", label: "Custom Range" },
+  ] as const;
+
+  function resolveRange(
+    preset: typeof PRESETS[number]["key"],
+    custom?: { start?: Date; end?: Date }
+  ) {
+    const now = new Date();
+    switch (preset) {
+      case "today":
+        return { start: startOfDay(now), end: endOfDay(now) };
+      case "yesterday": {
+        const y = new Date(now);
+        y.setDate(now.getDate() - 1);
+        return { start: startOfDay(y), end: endOfDay(y) };
+      }
+      case "this_month":
+        return { start: startOfMonth(now), end: endOfMonth(now) };
+      case "last_month": {
+        const prev = addMonths(now, -1);
+        return { start: startOfMonth(prev), end: endOfMonth(prev) };
+      }
+      case "last_3_months":
+        return { start: startOfMonth(addMonths(now, -2)), end: endOfMonth(now) };
+      case "this_year":
+        return { start: startOfYear(now), end: endOfYear(now) };
+      case "custom":
+      default:
+        return {
+          start: custom?.start ?? startOfMonth(now),
+          end: custom?.end ?? endOfDay(now),
+        };
+    }
+  }
+
   const { start, end } = useMemo(() => {
     const cs = customStart ? new Date(customStart) : undefined;
     const ce = customEnd ? new Date(customEnd) : undefined;
@@ -248,6 +287,7 @@ export default function AssistantDashboardVapi({
       setSyncing(false);
       void loadData();
       void loadBillingUsage();
+      if (view === "invoice") void loadInvoiceHistory();
     }
   }
 
@@ -307,7 +347,6 @@ export default function AssistantDashboardVapi({
     try {
       const db = getFirestore(firebaseApp);
 
-      // Find the user document by assistantId (or adjust to uid if desired)
       const usersQ = query(
         collection(db, "users"),
         where("assistantId", "==", assistantId),
@@ -321,7 +360,6 @@ export default function AssistantDashboardVapi({
       }
       const u = usersSnap.docs[0].data() as Record<string, unknown>;
 
-      // Support both exact labels and camelCase fallbacks
       setPlanName(String(u["Plan Name"] ?? u.planName ?? "—"));
       setPlanMonthlyCalls(
         typeof u["Plan Monthly Calls"] === "number"
@@ -411,8 +449,7 @@ export default function AssistantDashboardVapi({
     rows.forEach((r) => {
       const d = tsToDate(r.startTime);
       if (!d) return;
-      const h = d.getHours();
-      buckets[h].calls += 1;
+      buckets[d.getHours()].calls += 1;
     });
     return buckets;
   }, [rows]);
@@ -430,27 +467,85 @@ export default function AssistantDashboardVapi({
   const overageCount = Math.max(0, -callBalance); // how many calls above plan
   const overageAmount = overageCount * planOverageFee;
 
+  // -------- Invoice History Loader --------
+  async function loadInvoiceHistory() {
+    // Needs plan info
+    if (planLoading || planError) return;
+    setInvoiceLoading(true);
+    setInvoiceError(null);
+    try {
+      const db = getFirestore(firebaseApp);
+      const now = new Date();
+
+      // Determine first month to list
+      const startFromPlan =
+        parsePlanStartMonth(planStartMonth ?? undefined) ??
+        // fallback: show the last 6 months if plan start unknown
+        startOfMonth(addMonths(now, -5));
+
+      const months = monthRangeInclusive(startFromPlan, now);
+
+      // For each month, count calls
+      const rows: InvoiceRow[] = [];
+      for (const m of months) {
+        const ms = startOfMonth(m);
+        const me = endOfMonth(m);
+
+        const qy = query(
+          collection(db, "callLogs"),
+          where("assistantId", "==", assistantId),
+          orderBy("startTime", "desc"),
+          where("startTime", ">=", Timestamp.fromDate(ms)),
+          where("startTime", "<=", Timestamp.fromDate(me))
+        );
+        const snap = await getDocs(qy);
+        const actualCalls = snap.size;
+
+        const balance = planMonthlyCalls - actualCalls;
+        const overCount = Math.max(0, -balance);
+        const overage = overCount * planOverageFee;
+        const total = planMonthlyFee + overage;
+
+        rows.push({
+          month: fmtMonth(ms),
+          planName,
+          planMonthlyFee: planMonthlyFee,
+          planMonthlyCalls: planMonthlyCalls,
+          actualCalls,
+          callBalance: balance,
+          callOverageFee: planOverageFee,
+          calculatedOverage: overage,
+          totalInvoice: total,
+        });
+      }
+
+      // Sort newest first
+      rows.sort((a, b) => {
+        const da = new Date(a.month);
+        const dbb = new Date(b.month);
+        return dbb.getTime() - da.getTime();
+      });
+
+      setInvoiceRows(rows);
+    } catch (e) {
+      setInvoiceError(
+        e instanceof Error ? e.message : "Failed to load invoice history."
+      );
+    } finally {
+      setInvoiceLoading(false);
+    }
+  }
+
+  // Load invoice rows whenever switching to "invoice" (once plan is ready)
+  useEffect(() => {
+    if (view === "invoice" && !planLoading && !invoiceLoading) {
+      void loadInvoiceHistory();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, planLoading, assistantId]);
+
   return (
     <div>
-      {/* ---- Plan Header under the page title ---- */}
-      <div className="rounded-xl bg-white border border-gray-200 p-4 mb-5">
-        {planLoading ? (
-          <div className="text-sm text-gray-500">Loading plan…</div>
-        ) : planError ? (
-          <div className="text-sm text-red-600">{planError}</div>
-        ) : (
-          <div className="space-y-1 text-base">
-            <div>
-              <span className="font-medium">Plan Type</span> — {planName || "—"}
-            </div>
-            <div>
-              <span className="font-medium">Plan Start Month</span>{" "}
-              — {planStartMonth || "—"}
-            </div>
-          </div>
-        )}
-      </div>
-
       {/* Filters Row */}
       <div className="grid md:grid-cols-3 gap-3 items-end mb-6">
         <div>
@@ -458,7 +553,9 @@ export default function AssistantDashboardVapi({
           <select
             className="w-full border rounded-xl p-2 mt-1"
             value={preset}
-            onChange={(e) => setPreset(e.target.value as PresetKey)}
+            onChange={(e) =>
+              setPreset(e.target.value as Parameters<typeof resolveRange>[0])
+            }
           >
             {PRESETS.map((p) => (
               <option key={p.key} value={p.key}>
@@ -517,12 +614,13 @@ export default function AssistantDashboardVapi({
             <option value="log">Call Log</option>
             <option value="hourly">Hourly Analysis</option>
             <option value="billing">Billing</option>
+            <option value="invoice">Invoice History</option>
           </select>
         </div>
       </div>
 
-      {/* KPIs (hide when Billing view is active) */}
-      {view !== "billing" && (
+      {/* KPIs (hide when Billing/Invoice view is active) */}
+      {view !== "billing" && view !== "invoice" && (
         <>
           <div className="mb-2 text-gray-500 text-sm">
             <span className="opacity-80 font-medium">Metrics</span> —{" "}
@@ -613,10 +711,12 @@ export default function AssistantDashboardVapi({
                   <span className="text-gray-600">Call Balance</span>
                   <span
                     className={`font-medium ${
-                      callBalance < 0 ? "text-red-600" : "text-green-700"
+                      planMonthlyCalls - callsThisMonth < 0
+                        ? "text-red-600"
+                        : "text-green-700"
                     }`}
                   >
-                    {nf(callBalance)}
+                    {nf(planMonthlyCalls - callsThisMonth)}
                   </span>
                 </div>
                 <div className="flex justify-between gap-4">
@@ -626,9 +726,11 @@ export default function AssistantDashboardVapi({
                 <div className="flex justify-between gap-4">
                   <span className="text-gray-600">Calculated Overage</span>
                   <span className="font-semibold">
-                    {overageCount > 0 ? `${nf(overageCount)} calls` : "0 calls"}
-                    {" · "}
-                    {usd(overageAmount)}
+                    {Math.max(0, callsThisMonth - planMonthlyCalls)} calls ·{" "}
+                    {usd(
+                      Math.max(0, callsThisMonth - planMonthlyCalls) *
+                        planOverageFee
+                    )}
                   </span>
                 </div>
                 {planStartMonth && (
@@ -653,6 +755,80 @@ export default function AssistantDashboardVapi({
                 />
               </div>
             </>
+          )}
+        </div>
+      ) : view === "invoice" ? (
+        <div className="rounded-2xl shadow bg-white border border-gray-100 overflow-hidden">
+          <div className="px-5 py-4 border-b">
+            <div className="font-medium">Invoice History</div>
+            <div className="text-sm text-gray-500">
+              Monthly invoices from plan start to current month
+            </div>
+          </div>
+          {planError ? (
+            <div className="p-5 text-red-600">{planError}</div>
+          ) : invoiceLoading ? (
+            <div className="p-5 text-gray-500">Loading invoice history…</div>
+          ) : invoiceError ? (
+            <div className="p-5 text-red-600">{invoiceError}</div>
+          ) : invoiceRows.length === 0 ? (
+            <div className="p-5 text-gray-400">No invoice data.</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full">
+                <thead>
+                  <tr className="text-left text-xs uppercase text-gray-500">
+                    <th className="py-2 px-3">Month</th>
+                    <th className="py-2 px-3">Plan Name</th>
+                    <th className="py-2 px-3 text-right">Plan Monthly Fee</th>
+                    <th className="py-2 px-3 text-right">Plan Monthly Calls</th>
+                    <th className="py-2 px-3 text-right">Actual Calls</th>
+                    <th className="py-2 px-3 text-right">Call Balance</th>
+                    <th className="py-2 px-3 text-right">Call Overage Fee</th>
+                    <th className="py-2 px-3 text-right">Calculated Overage</th>
+                    <th className="py-2 px-3 text-right">Total Invoice</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {invoiceRows.map((r, idx) => (
+                    <tr
+                      key={`${r.month}-${idx}`}
+                      className="border-b last:border-0"
+                    >
+                      <td className="py-2 px-3 whitespace-nowrap text-sm">
+                        {r.month}
+                      </td>
+                      <td className="py-2 px-3 text-sm">{r.planName}</td>
+                      <td className="py-2 px-3 text-sm text-right">
+                        {usd(r.planMonthlyFee)}
+                      </td>
+                      <td className="py-2 px-3 text-sm text-right">
+                        {nf(r.planMonthlyCalls)}
+                      </td>
+                      <td className="py-2 px-3 text-sm text-right">
+                        {nf(r.actualCalls)}
+                      </td>
+                      <td
+                        className={`py-2 px-3 text-sm text-right ${
+                          r.callBalance < 0 ? "text-red-600" : "text-green-700"
+                        }`}
+                      >
+                        {nf(r.callBalance)}
+                      </td>
+                      <td className="py-2 px-3 text-sm text-right">
+                        {usd(r.callOverageFee)}
+                      </td>
+                      <td className="py-2 px-3 text-sm text-right">
+                        {usd(r.calculatedOverage)}
+                      </td>
+                      <td className="py-2 px-3 text-sm text-right font-medium">
+                        {usd(r.totalInvoice)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       ) : (
