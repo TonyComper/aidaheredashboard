@@ -6,13 +6,13 @@ import {
   collection,
   getDocs,
   getFirestore,
+  limit,
   orderBy,
   query,
   Timestamp,
   where,
 } from "firebase/firestore";
 import { app as firebaseApp } from "@/lib/firebase";
-import { useAuth } from "@/components/AuthProvider";
 import dynamic from "next/dynamic";
 
 // Recharts (client-only)
@@ -128,7 +128,7 @@ function resolveRange(
 function nf(n: number, opts?: Intl.NumberFormatOptions) {
   return new Intl.NumberFormat(undefined, opts).format(n);
 }
-function currency(n: number) {
+function usd(n: number) {
   return new Intl.NumberFormat(undefined, {
     style: "currency",
     currency: "USD",
@@ -169,22 +169,22 @@ function KpiCard({
   return (
     <div className="rounded-2xl shadow p-5 bg-white border border-gray-100">
       <div className="text-gray-500 text-sm">{title}</div>
-      <div className="text-3xl font-semibold mt-1">{value}</div>
+      <div className="text-3xl font-semibold mt-1 break-words">{value}</div>
       {subtitle && <div className="text-xs text-gray-400 mt-1">{subtitle}</div>}
     </div>
   );
 }
 
-// Utility: read plan fields from profile (supports legacy keys with spaces)
-function planField<T = number | string>(
-  profile: any,
-  camel: string,
-  legacy?: string
-): T | undefined {
-  if (!profile) return undefined;
-  if (profile[camel] !== undefined) return profile[camel] as T;
-  if (legacy && profile[legacy] !== undefined) return profile[legacy] as T;
-  return undefined;
+function ProgressBar({ pct }: { pct: number }) {
+  const clamped = Math.max(0, Math.min(100, pct));
+  return (
+    <div className="w-full h-3 rounded-full bg-gray-200 overflow-hidden">
+      <div
+        className={`h-full ${clamped >= 100 ? "bg-red-500" : "bg-green-500"}`}
+        style={{ width: `${clamped}%` }}
+      />
+    </div>
+  );
 }
 
 // ============================================================
@@ -196,8 +196,6 @@ export default function AssistantDashboardVapi({
   assistantId: string;
   pageSize?: number;
 }) {
-  const { profile } = useAuth();
-
   // Period + custom range
   const [preset, setPreset] = useState<PresetKey>("today");
   const [customStart, setCustomStart] = useState<string>("");
@@ -208,17 +206,24 @@ export default function AssistantDashboardVapi({
   const [rows, setRows] = useState<CallRow[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  // Syncing status
-  const [syncing, setSyncing] = useState<boolean>(false);
-
   // Drawer
   const [drawerId, setDrawerId] = useState<string | null>(null);
 
-  // View switch
+  // View switch (+ Billing)
   const [view, setView] = useState<ViewMode>("log");
 
-  // Dedicated month rows for Billing
-  const [monthRows, setMonthRows] = useState<CallRow[] | null>(null);
+  // Sync state
+  const [syncing, setSyncing] = useState<boolean>(false);
+
+  // Billing state
+  const [planLoading, setPlanLoading] = useState<boolean>(true);
+  const [planError, setPlanError] = useState<string | null>(null);
+  const [planName, setPlanName] = useState<string>("-");
+  const [planMonthlyCalls, setPlanMonthlyCalls] = useState<number>(0);
+  const [planMonthlyFee, setPlanMonthlyFee] = useState<number>(0);
+  const [planStartMonth, setPlanStartMonth] = useState<string | null>(null);
+  const [planOverageFee, setPlanOverageFee] = useState<number>(0);
+  const [callsThisMonth, setCallsThisMonth] = useState<number>(0);
 
   // Resolve the date range (local time)
   const { start, end } = useMemo(() => {
@@ -227,7 +232,7 @@ export default function AssistantDashboardVapi({
     return resolveRange(preset, { start: cs, end: ce });
   }, [preset, customStart, customEnd]);
 
-  // Sync now → pull from Vapi to Firestore (server-side), for THIS window
+  // -------- SYNC (server route) ----------
   async function syncNow() {
     setSyncing(true);
     try {
@@ -237,22 +242,22 @@ export default function AssistantDashboardVapi({
         end: end.toISOString(),
       });
       await fetch(`/api/vapi/sync?${params}`, { method: "GET" });
+    } catch {
+      // ignore
     } finally {
       setSyncing(false);
-      void loadData(); // refresh table after sync
-      if (view === "billing") void loadThisMonthData();
+      void loadData();
+      void loadBillingUsage();
     }
   }
 
-  // Fetch from Firestore (client-side) for current window
+  // -------- DATA (call logs) ----------
   async function loadData() {
     setLoading(true);
     setError(null);
     try {
       const db = getFirestore(firebaseApp);
       const col = collection(db, "callLogs");
-
-      // Requires composite index
       const qy = query(
         col,
         where("assistantId", "==", assistantId),
@@ -260,7 +265,6 @@ export default function AssistantDashboardVapi({
         where("startTime", ">=", Timestamp.fromDate(start)),
         where("startTime", "<=", Timestamp.fromDate(end))
       );
-
       const snap = await getDocs(qy);
       const arr: CallRow[] = snap.docs.slice(0, pageSize).map((d) => {
         const data = d.data() as Record<string, unknown>;
@@ -291,143 +295,147 @@ export default function AssistantDashboardVapi({
     }
   }
 
-  // Fetch THIS MONTH calls (for Billing only)
-  async function loadThisMonthData() {
-    try {
-      const db = getFirestore(firebaseApp);
-      const col = collection(db, "callLogs");
-      const now = new Date();
-      const mStart = startOfMonth(now);
-      const mEnd = endOfMonth(now);
-
-      const qy = query(
-        col,
-        where("assistantId", "==", assistantId),
-        orderBy("startTime", "desc"),
-        where("startTime", ">=", Timestamp.fromDate(mStart)),
-        where("startTime", "<=", Timestamp.fromDate(mEnd))
-      );
-
-      const snap = await getDocs(qy);
-      const arr: CallRow[] = snap.docs.map((d) => {
-        const data = d.data() as Record<string, unknown>;
-        return {
-          id: d.id,
-          assistantId: String(data.assistantId ?? assistantId),
-          startTime: (data.startTime as Timestamp) ?? null,
-          endTime: (data.endTime as Timestamp) ?? null,
-          durationSeconds:
-            typeof data.durationSeconds === "number"
-              ? (data.durationSeconds as number)
-              : null,
-          status: (data.status as string) ?? null,
-          from: (data.from as string) ?? null,
-          to: (data.to as string) ?? null,
-          recordingUrl: (data.recordingUrl as string) ?? null,
-          transcript: (data.transcript as string) ?? null,
-        };
-      });
-
-      setMonthRows(arr);
-    } catch {
-      setMonthRows([]);
-    }
-  }
-
-  // Initial + whenever range/assistant changes
   useEffect(() => {
     void loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [assistantId, start.getTime(), end.getTime()]);
 
-  // Load monthRows when switching to Billing
-  useEffect(() => {
-    if (view === "billing") void loadThisMonthData();
-  }, [view, assistantId]);
+  // -------- BILLING (plan + usage) ----------
+  async function loadBillingPlan() {
+    setPlanLoading(true);
+    setPlanError(null);
+    try {
+      const db = getFirestore(firebaseApp);
 
-  // KPI totals for current window
+      // Find the user document by assistantId (or adjust to uid if desired)
+      const usersQ = query(
+        collection(db, "users"),
+        where("assistantId", "==", assistantId),
+        limit(1)
+      );
+      const usersSnap = await getDocs(usersQ);
+      if (usersSnap.empty) {
+        setPlanError("No user profile found for this assistant.");
+        setPlanLoading(false);
+        return;
+      }
+      const u = usersSnap.docs[0].data() as Record<string, unknown>;
+
+      // Support both exact labels and camelCase fallbacks
+      setPlanName(String(u["Plan Name"] ?? u.planName ?? "—"));
+      setPlanMonthlyCalls(
+        typeof u["Plan Monthly Calls"] === "number"
+          ? (u["Plan Monthly Calls"] as number)
+          : typeof u.planMonthlyCalls === "number"
+          ? (u.planMonthlyCalls as number)
+          : 0
+      );
+      setPlanMonthlyFee(
+        typeof u["Plan Monthly Fee"] === "number"
+          ? (u["Plan Monthly Fee"] as number)
+          : typeof u.planMonthlyFee === "number"
+          ? (u.planMonthlyFee as number)
+          : 0
+      );
+      setPlanOverageFee(
+        typeof u["Plan Overage Fee"] === "number"
+          ? (u["Plan Overage Fee"] as number)
+          : typeof u.planOverageFee === "number"
+          ? (u.planOverageFee as number)
+          : 0
+      );
+      setPlanStartMonth(
+        typeof u["Plan Start Month"] === "string"
+          ? (u["Plan Start Month"] as string)
+          : typeof u.planStartMonth === "string"
+          ? (u.planStartMonth as string)
+          : null
+      );
+    } catch (e) {
+      setPlanError(
+        e instanceof Error ? e.message : "Failed to load billing plan."
+      );
+    } finally {
+      setPlanLoading(false);
+    }
+  }
+
+  async function loadBillingUsage() {
+    try {
+      const db = getFirestore(firebaseApp);
+      const now = new Date();
+      const ms = startOfMonth(now);
+      const me = endOfMonth(now);
+
+      const qy = query(
+        collection(db, "callLogs"),
+        where("assistantId", "==", assistantId),
+        orderBy("startTime", "desc"),
+        where("startTime", ">=", Timestamp.fromDate(ms)),
+        where("startTime", "<=", Timestamp.fromDate(me))
+      );
+      const snap = await getDocs(qy);
+      setCallsThisMonth(snap.size);
+    } catch {
+      setCallsThisMonth(0);
+    }
+  }
+
+  useEffect(() => {
+    void loadBillingPlan();
+    void loadBillingUsage();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assistantId]);
+
+  // KPI totals for log/hourly
   const totalCalls = rows.length;
   const totalMinutes = useMemo(
-    () => rows.reduce((acc, it) => acc + minutesFromSeconds(it.durationSeconds), 0),
+    () =>
+      rows.reduce(
+        (acc, it) => acc + minutesFromSeconds(it.durationSeconds),
+        0
+      ),
     [rows]
   );
   const avgMinutes = totalCalls ? totalMinutes / totalCalls : 0;
 
-  // Hourly Analysis (ordered 0 → 23)
+  // Hourly Analysis dataset (midnight → 11 PM)
   const hourlyData = useMemo(() => {
-    // pre-fill 24 hours with 0
-    const hours = Array.from({ length: 24 }, (_, h) => ({
+    const buckets = Array.from({ length: 24 }, (_, h) => ({
       hour: h,
-      label: new Date(2000, 0, 1, h).toLocaleTimeString([], { hour: "numeric" }), // "12 AM", "1 AM", ...
+      label: new Date(2000, 0, 1, h, 0, 0).toLocaleTimeString([], {
+        hour: "numeric",
+      }),
       calls: 0,
     }));
     rows.forEach((r) => {
       const d = tsToDate(r.startTime);
       if (!d) return;
-      const h = d.getHours(); // local hour 0-23
-      hours[h].calls += 1;
+      const h = d.getHours();
+      buckets[h].calls += 1;
     });
-    return hours;
+    return buckets;
   }, [rows]);
 
-  // -------- Billing KPIs (from dedicated this-month fetch) --------
-  const billingSource =
-    monthRows ?? (preset === "this_month" ? rows : []);
-
-  const actualCallsMonth = billingSource.length;
-  const totalMinutesMonth = billingSource.reduce(
-    (acc, it) => acc + minutesFromSeconds(it.durationSeconds),
-    0
+  // Billing computations
+  const monthLabel = useMemo(
+    () =>
+      new Date().toLocaleString(undefined, {
+        month: "long",
+        year: "numeric",
+      }),
+    []
   );
-
-  // Plan fields (support legacy spaced keys just in case)
-  const planName =
-    planField<string>(profile, "planName", "Plan Name") ?? "—";
-  const planStartMonth =
-    planField<string>(profile, "planStartMonth", "Plan Start Month") ?? "—";
-  const planMonthlyCalls =
-    Number(planField<number>(profile, "planMonthlyCalls", "Plan Monthly Calls") ?? 0);
-  const planMonthlyFee =
-    Number(planField<number>(profile, "planMonthlyFee", "Plan Monthly Fee") ?? 0);
-  const planOverageFee =
-    Number(planField<number>(profile, "planOverageFee", "Plan Overage Fee") ?? 0);
-
-  const callBalance = planMonthlyCalls - actualCallsMonth;
-  const estimatedOverage = callBalance < 0 ? Math.abs(callBalance) * planOverageFee : 0;
+  const callBalance = planMonthlyCalls - callsThisMonth; // positive => remaining
+  const overageCount = Math.max(0, -callBalance); // how many calls above plan
+  const overageAmount = overageCount * planOverageFee;
+  const monthlyPct =
+    planMonthlyCalls > 0
+      ? Math.min(100, (callsThisMonth / planMonthlyCalls) * 100)
+      : 0;
 
   return (
     <div>
-      {/* Actions Row */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 mb-5">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={syncNow}
-            className="px-3 py-2 rounded-xl border bg-white hover:bg-gray-50"
-            disabled={syncing}
-          >
-            {syncing ? "Syncing…" : "Sync now"}
-          </button>
-          {syncing && (
-            <div className="text-sm text-blue-600">
-              SYNC in PROGRESS. Please wait…
-            </div>
-          )}
-        </div>
-
-        <div className="ml-auto flex items-center gap-2">
-          <span className="text-sm text-gray-600">View</span>
-          <select
-            className="border rounded-xl p-2"
-            value={view}
-            onChange={(e) => setView(e.target.value as ViewMode)}
-          >
-            <option value="log">Call Log</option>
-            <option value="hourly">Hourly Analysis</option>
-            <option value="billing">Billing</option>
-          </select>
-        </div>
-      </div>
-
       {/* Filters Row */}
       <div className="grid md:grid-cols-3 gap-3 items-end mb-6">
         <div>
@@ -467,40 +475,39 @@ export default function AssistantDashboardVapi({
         </div>
       </div>
 
-      {/* Views */}
-      {view === "hourly" && (
-        <div className="rounded-2xl shadow bg-white border border-gray-100 p-4">
-          <div className="px-1 pb-3">
-            <div className="font-medium">Hourly Analysis</div>
-            <div className="text-sm text-gray-500">
-              Calls grouped by local hour (0 → 23)
+      {/* Actions Row */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 mb-5">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={syncNow}
+            className="px-3 py-2 rounded-xl border bg-white hover:bg-gray-50"
+            disabled={syncing}
+          >
+            {syncing ? "Syncing…" : "Sync now"}
+          </button>
+          {syncing && (
+            <div className="text-sm text-blue-600">
+              SYNC in PROGRESS. Please wait…
             </div>
-          </div>
-          <div style={{ width: "100%", height: 320 }}>
-            <ResponsiveContainer>
-              <LineChart data={hourlyData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis
-                  dataKey="label"
-                  interval={0}
-                  tick={{ fontSize: 12 }}
-                />
-                <YAxis allowDecimals={false} />
-                <Tooltip />
-                <Line
-                  type="monotone"
-                  dataKey="calls"
-                  stroke="#3b82f6"
-                  strokeWidth={2}
-                  dot={{ r: 2 }}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
+          )}
         </div>
-      )}
 
-      {view === "log" && (
+        <div className="ml-auto flex items-center gap-2">
+          <span className="text-sm text-gray-600">View</span>
+          <select
+            className="border rounded-xl p-2"
+            value={view}
+            onChange={(e) => setView(e.target.value as ViewMode)}
+          >
+            <option value="log">Call Log</option>
+            <option value="hourly">Hourly Analysis</option>
+            <option value="billing">Billing</option>
+          </select>
+        </div>
+      </div>
+
+      {/* KPIs (hide when Billing view is active) */}
+      {view !== "billing" && (
         <>
           <div className="mb-2 text-gray-500 text-sm">
             <span className="opacity-80 font-medium">Metrics</span> —{" "}
@@ -520,126 +527,191 @@ export default function AssistantDashboardVapi({
               value={nf(avgMinutes, { maximumFractionDigits: 2 })}
             />
           </div>
-
-          <div className="rounded-2xl shadow bg-white border border-gray-100 overflow-hidden">
-            <div className="px-5 py-4 border-b">
-              <div className="font-medium">Call Log</div>
-              <div className="text-sm text-gray-500">
-                For the selected date or date range
-              </div>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="min-w-full">
-                <thead>
-                  <tr className="text-left text-xs uppercase text-gray-500">
-                    <th className="py-2 px-3">Date</th>
-                    <th className="py-2 px-3">Customer Phone</th>
-                    <th className="py-2 px-3">Start Time</th>
-                    <th className="py-2 px-3 text-right">Duration</th>
-                    <th className="py-2 px-3 text-right">Transcript</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {loading ? (
-                    <tr>
-                      <td className="py-6 px-3 text-gray-500" colSpan={5}>
-                        Loading…
-                      </td>
-                    </tr>
-                  ) : error ? (
-                    <tr>
-                      <td className="py-6 px-3 text-red-600" colSpan={5}>
-                        {error}
-                      </td>
-                    </tr>
-                  ) : rows.length === 0 ? (
-                    <tr>
-                      <td className="py-6 px-3 text-gray-400" colSpan={5}>
-                        No calls in this period.
-                      </td>
-                    </tr>
-                  ) : (
-                    rows.map((it) => {
-                      const mins = it.durationSeconds
-                        ? Math.round(it.durationSeconds / 60)
-                        : 0;
-                      return (
-                        <tr
-                          key={it.id}
-                          className="border-b last:border-0 hover:bg-gray-50"
-                        >
-                          <td className="py-2 px-3 whitespace-nowrap text-sm">
-                            {fmtDate(it.startTime)}
-                          </td>
-                          <td className="py-2 px-3 text-sm">{it.from || "—"}</td>
-                          <td className="py-2 px-3 text-sm">
-                            {fmtTime(it.startTime)}
-                          </td>
-                          <td className="py-2 px-3 text-sm text-right">
-                            {mins} min
-                          </td>
-                          <td className="py-2 px-3 text-sm text-right">
-                            <button
-                              className="underline"
-                              onClick={() => setDrawerId(it.id)}
-                            >
-                              View
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
         </>
       )}
 
-      {view === "billing" && (
-        <div className="rounded-2xl shadow bg-white border border-gray-100 p-5">
-          <div className="text-xl font-semibold mb-2">
-            Billing — Current Month
+      {/* Conditional Views */}
+      {view === "hourly" ? (
+        <div className="rounded-2xl shadow bg-white border border-gray-100 p-4">
+          <div className="px-1 pb-3">
+            <div className="font-medium">Hourly Analysis</div>
+            <div className="text-sm text-gray-500">
+              Calls grouped by call start time (hour)
+            </div>
           </div>
-          <div className="text-sm text-gray-600 mb-4">
-            Plan: <span className="font-medium">{planName}</span>
-            {" · "}Plan Start Date — <span className="font-medium">{planStartMonth}</span>
+          <div style={{ width: "100%", height: 320 }}>
+            <ResponsiveContainer>
+              <LineChart data={hourlyData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="label" />
+                <YAxis allowDecimals={false} />
+                <Tooltip />
+                <Line
+                  type="monotone"
+                  dataKey="calls"
+                  stroke="#3b82f6"
+                  strokeWidth={2}
+                  dot={{ r: 2 }}
+                />
+              </LineChart>
+            </ResponsiveContainer>
           </div>
-
-          <div className="grid lg:grid-cols-3 gap-4">
-            <KpiCard
-              title="Plan Monthly Calls"
-              value={nf(planMonthlyCalls)}
-            />
-            <KpiCard
-              title="Plan Monthly Fee"
-              value={currency(planMonthlyFee)}
-            />
-            <KpiCard
-              title="Overage Fee (per call)"
-              value={currency(planOverageFee)}
-            />
-
-            <KpiCard
-              title="Actual Calls (this month)"
-              value={nf(actualCallsMonth)}
-            />
-            <KpiCard
-              title="Call Balance"
-              value={nf(callBalance)}
-              subtitle="Plan Calls - Actual Calls"
-            />
-            <KpiCard
-              title="Estimated Overage"
-              value={currency(estimatedOverage)}
-              subtitle="If balance is negative"
-            />
+        </div>
+      ) : view === "billing" ? (
+        <div className="rounded-2xl shadow bg-white border border-gray-100 p-5 space-y-6">
+          <div>
+            <div className="font-medium text-lg">Billing</div>
+            <div className="text-sm text-gray-500">
+              Plan details and this month’s usage
+            </div>
           </div>
 
-          <div className="text-xs text-gray-400 mt-4">
-            Window: {startOfMonth(new Date()).toLocaleString()} →{" "}
-            {endOfMonth(new Date()).toLocaleString()}
+          {planLoading ? (
+            <div className="text-gray-500">Loading plan…</div>
+          ) : planError ? (
+            <div className="text-red-600">{planError}</div>
+          ) : (
+            <>
+              {/* List-style summary */}
+              <div className="rounded-xl border bg-gray-50 p-4 space-y-2 text-sm">
+                <div className="flex justify-between gap-4">
+                  <span className="text-gray-600">Current Month/Year</span>
+                  <span className="font-medium">{monthLabel}</span>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <span className="text-gray-600">Plan Name</span>
+                  <span className="font-medium">{planName}</span>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <span className="text-gray-600">Plan Monthly Fee</span>
+                  <span className="font-medium">{usd(planMonthlyFee)}</span>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <span className="text-gray-600">Plan Monthly Calls</span>
+                  <span className="font-medium">{nf(planMonthlyCalls)}</span>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <span className="text-gray-600">Actual Monthly Calls</span>
+                  <span className="font-medium">{nf(callsThisMonth)}</span>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <span className="text-gray-600">Call Balance</span>
+                  <span
+                    className={`font-medium ${
+                      callBalance < 0 ? "text-red-600" : "text-green-700"
+                    }`}
+                  >
+                    {nf(callBalance)}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <span className="text-gray-600">Call Overage Fee</span>
+                  <span className="font-medium">{usd(planOverageFee)}</span>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <span className="text-gray-600">Calculated Overage</span>
+                  <span className="font-semibold">
+                    {overageCount > 0 ? `${nf(overageCount)} calls` : "0 calls"}
+                    {" · "}
+                    {usd(overageAmount)}
+                  </span>
+                </div>
+                {planStartMonth && (
+                  <div className="flex justify-between gap-4">
+                    <span className="text-gray-600">Plan Start Month</span>
+                    <span className="font-medium">{planStartMonth}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Visual usage bar */}
+              <div className="space-y-2">
+                <div className="text-sm text-gray-600">
+                  Monthly usage ({nf(callsThisMonth)} / {nf(planMonthlyCalls)})
+                </div>
+                <ProgressBar
+                  pct={
+                    planMonthlyCalls > 0
+                      ? Math.min(100, (callsThisMonth / planMonthlyCalls) * 100)
+                      : 0
+                  }
+                />
+              </div>
+            </>
+          )}
+        </div>
+      ) : (
+        <div className="rounded-2xl shadow bg-white border border-gray-100 overflow-hidden">
+          <div className="px-5 py-4 border-b">
+            <div className="font-medium">Call Log</div>
+            <div className="text-sm text-gray-500">
+              For the selected date or date range
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-full">
+              <thead>
+                <tr className="text-left text-xs uppercase text-gray-500">
+                  <th className="py-2 px-3">Date</th>
+                  <th className="py-2 px-3">Customer Phone</th>
+                  <th className="py-2 px-3">Start Time</th>
+                  <th className="py-2 px-3 text-right">Duration</th>
+                  <th className="py-2 px-3 text-right">Transcript</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? (
+                  <tr>
+                    <td className="py-6 px-3 text-gray-500" colSpan={5}>
+                      Loading…
+                    </td>
+                  </tr>
+                ) : error ? (
+                  <tr>
+                    <td className="py-6 px-3 text-red-600" colSpan={5}>
+                      {error}
+                    </td>
+                  </tr>
+                ) : rows.length === 0 ? (
+                  <tr>
+                    <td className="py-6 px-3 text-gray-400" colSpan={5}>
+                      No calls in this period.
+                    </td>
+                  </tr>
+                ) : (
+                  rows.map((it) => {
+                    const mins = it.durationSeconds
+                      ? Math.round(it.durationSeconds / 60)
+                      : 0;
+                    return (
+                      <tr
+                        key={it.id}
+                        className="border-b last:border-0 hover:bg-gray-50"
+                      >
+                        <td className="py-2 px-3 whitespace-nowrap text-sm">
+                          {fmtDate(it.startTime)}
+                        </td>
+                        <td className="py-2 px-3 text-sm">{it.from || "—"}</td>
+                        <td className="py-2 px-3 text-sm">
+                          {fmtTime(it.startTime)}
+                        </td>
+                        <td className="py-2 px-3 text-sm text-right">
+                          {mins} min
+                        </td>
+                        <td className="py-2 px-3 text-sm text-right">
+                          <button
+                            className="underline"
+                            onClick={() => setDrawerId(it.id)}
+                          >
+                            View
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
       )}
