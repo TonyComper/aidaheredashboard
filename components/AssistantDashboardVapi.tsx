@@ -67,6 +67,9 @@ function endOfDay(d = new Date()) {
 function startOfMonth(d = new Date()) {
   return new Date(d.getFullYear(), d.getMonth(), 1, 0, 0, 0, 0);
 }
+function startOfNextMonth(d = new Date()) {
+  return new Date(d.getFullYear(), d.getMonth() + 1, 1, 0, 0, 0, 0);
+}
 function endOfMonth(d = new Date()) {
   return new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59, 999);
 }
@@ -269,12 +272,9 @@ export default function AssistantDashboardVapi({
       const constraints: QueryConstraint[] = [
         where("assistantId", "==", assistantId),
         orderBy("startTime", "desc"),
+        where("startTime", ">=", Timestamp.fromDate(start)),
+        where("startTime", "<=", Timestamp.fromDate(end)),
       ];
-
-      // add date filters to use the selected window
-      constraints.push(where("startTime", ">=", Timestamp.fromDate(start)));
-      constraints.push(where("startTime", "<=", Timestamp.fromDate(end)));
-
       const qy = query(col, ...constraints);
       const snap = await getDocs(qy);
       const arr: CallRow[] = snap.docs.slice(0, pageSize).map((d) => {
@@ -336,17 +336,21 @@ export default function AssistantDashboardVapi({
     }
   }
 
-  // Calls in current calendar month (for Billing view)
+  // Calls in current calendar month (strict window: >= firstOfMonth, < firstOfNextMonth)
   async function loadBillingUsage() {
     const now = new Date();
+    const monthStart = startOfMonth(now);
+    const nextMonthStart = startOfNextMonth(now);
+
     const snap = await getDocs(
       query(
         collection(db, "callLogs"),
         where("assistantId", "==", assistantId),
-        where("startTime", ">=", Timestamp.fromDate(startOfMonth(now))),
-        where("startTime", "<=", Timestamp.fromDate(endOfMonth(now)))
+        where("startTime", ">=", Timestamp.fromDate(monthStart)),
+        where("startTime", "<", Timestamp.fromDate(nextMonthStart))
       )
     );
+
     setCallsThisMonth(snap.size);
   }
 
@@ -359,6 +363,7 @@ export default function AssistantDashboardVapi({
         orderBy("startTime", "asc")
       )
     );
+
     const buckets: Record<string, number> = {};
     snap.forEach((doc) => {
       const d = tsToDate(doc.data().startTime as Timestamp);
@@ -402,19 +407,22 @@ export default function AssistantDashboardVapi({
     setBillingHistory(history);
   }
 
-  // Initial & when assistant or window changes
+  // Initial & when assistant changes
   useEffect(() => {
-    void loadBillingPlan(); // header info
+    void loadBillingPlan(); // for plan labels in billing views
+    void loadBillingUsage();
+    void loadBillingHistory();
   }, [assistantId]);
 
+  // When plan settings change, recompute history (fees/allowance impact totals)
+  useEffect(() => {
+    void loadBillingHistory();
+  }, [planMonthlyCalls, planMonthlyFee, planOverageFee]);
+
+  // When the range changes, reload the table/metrics
   useEffect(() => {
     void loadData();
   }, [assistantId, start.getTime(), end.getTime()]);
-
-  useEffect(() => {
-    void loadBillingUsage();
-    void loadBillingHistory();
-  }, [assistantId, planMonthlyCalls, planMonthlyFee, planOverageFee]);
 
   // KPI totals (for selected window)
   const totalCalls = rows.length;
@@ -444,28 +452,33 @@ export default function AssistantDashboardVapi({
 
   return (
     <div>
-      {/* Header (Plan info replaces Assistant ID) */}
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <div className="text-2xl font-semibold">Dashboard</div>
-          <div className="text-gray-500 text-sm">
-            {planName} — {planStartMonth ?? "No Start Month"}
+      {/* Actions + Sync Row (no internal Dashboard header) */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 mb-5">
+        <button
+          onClick={syncNow}
+          className="px-3 py-2 rounded-xl border bg-white hover:bg-gray-50"
+          disabled={syncing}
+        >
+          {syncing ? "Syncing…" : "Sync now"}
+        </button>
+        {syncing && (
+          <div className="text-sm text-gray-600">
+            <span className="animate-pulse">SYNC in PROGRESS. Please wait…</span>
           </div>
-        </div>
+        )}
 
-        <div className="flex items-center gap-3">
-          {syncing && (
-            <span className="text-sm text-gray-600">
-              <span className="animate-pulse">SYNC in PROGRESS. Please wait…</span>
-            </span>
-          )}
-          <button
-            onClick={syncNow}
-            className="px-3 py-2 rounded-xl border bg-white hover:bg-gray-50"
-            disabled={syncing}
+        <div className="ml-auto flex items-center gap-2">
+          <span className="text-sm text-gray-600">View</span>
+          <select
+            className="border rounded-xl p-2"
+            value={view}
+            onChange={(e) => setView(e.target.value as ViewMode)}
           >
-            {syncing ? "Syncing…" : "Sync now"}
-          </button>
+            <option value="log">Call Log</option>
+            <option value="hourly">Hourly Analysis</option>
+            <option value="billing">Billing</option>
+            <option value="billing_history">Billing History</option>
+          </select>
         </div>
       </div>
 
@@ -505,23 +518,6 @@ export default function AssistantDashboardVapi({
             onChange={(e) => setCustomEnd(e.target.value)}
             disabled={preset !== "custom"}
           />
-        </div>
-      </div>
-
-      {/* Actions Row */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 mb-5">
-        <div className="ml-auto flex items-center gap-2">
-          <span className="text-sm text-gray-600">View</span>
-          <select
-            className="border rounded-xl p-2"
-            value={view}
-            onChange={(e) => setView(e.target.value as ViewMode)}
-          >
-            <option value="log">Call Log</option>
-            <option value="hourly">Hourly Analysis</option>
-            <option value="billing">Billing</option>
-            <option value="billing_history">Billing History</option>
-          </select>
         </div>
       </div>
 
@@ -580,7 +576,7 @@ export default function AssistantDashboardVapi({
         <div className="rounded-2xl shadow bg-white border border-gray-100 p-5 space-y-4">
           <div className="font-medium text-lg">Billing — Current Month</div>
           <div className="text-sm text-gray-600">
-            Plan: <span className="font-medium">{planName}</span> · Start:{" "}
+            Plan: <span className="font-medium">{planName}</span> · Plan Start Date —{" "}
             {planStartMonth ?? "—"}
           </div>
 
