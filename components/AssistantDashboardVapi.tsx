@@ -524,7 +524,9 @@ export default function AssistantDashboardVapi({
     planOverageFee?: number;
     planStartMonth?: string | null;
   }) {
-    if (planLoading || planError) return;
+    // ⬇️ Only block on planLoading if we DON'T have an override
+    if (!override && (planLoading || planError)) return;
+
     setInvoiceLoading(true);
     setInvoiceError(null);
     try {
