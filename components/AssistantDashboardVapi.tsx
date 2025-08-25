@@ -172,7 +172,7 @@ function fmtMonth(d: Date) {
   return d.toLocaleString(undefined, { month: "long", year: "numeric" });
 }
 
-// Robust parser for "Plan Start Month"
+// Robust parser for legacy "Plan Start Month" strings
 function parsePlanStartMonth(input?: string | null): Date | null {
   if (!input) return null;
 
@@ -183,8 +183,18 @@ function parsePlanStartMonth(input?: string | null): Date | null {
     .replace(/\s+/g, " ")
     .trim();
 
-  const d1 = new Date(cleaned);
-  if (!isNaN(d1.getTime())) return startOfMonth(d1);
+  const m1 = cleaned.match(/^([A-Za-z]+)\s+(\d{4})$/);
+  if (m1) {
+    const months = [
+      "january","february","march","april","may","june",
+      "july","august","september","october","november","december"
+    ];
+    const idx = months.indexOf(m1[1].toLowerCase());
+    const year = parseInt(m1[2], 10);
+    if (idx >= 0 && year >= 1970 && year <= 9999) {
+      return new Date(year, idx, 1, 0, 0, 0, 0);
+    }
+  }
 
   let m = cleaned.match(/^(\d{4})[-/](\d{1,2})$/);
   if (m) {
@@ -200,27 +210,11 @@ function parsePlanStartMonth(input?: string | null): Date | null {
     if (month >= 0 && month < 12) return new Date(year, month, 1, 0, 0, 0, 0);
   }
 
-  return null;
-}
+  const fallback = new Date(cleaned);
+  if (!isNaN(fallback.getTime()))
+    return new Date(fallback.getFullYear(), fallback.getMonth(), 1, 0, 0, 0, 0);
 
-// ----------------- Robust Firestore field resolver -----------------
-function normalizeKey(k: string) {
-  return k.toLowerCase().replace(/\s+/g, "");
-}
-function getField<T = unknown>(
-  obj: Record<string, unknown>,
-  candidates: string[],
-  fallback?: T
-): T | undefined {
-  const map = new Map<string, string>();
-  for (const k of Object.keys(obj)) {
-    map.set(normalizeKey(k), k);
-  }
-  for (const c of candidates) {
-    const found = map.get(normalizeKey(c));
-    if (found != null) return obj[found] as T;
-  }
-  return fallback;
+  return null;
 }
 
 function KpiCard({
@@ -287,7 +281,7 @@ export default function AssistantDashboardVapi({
   const [planName, setPlanName] = useState<string>("-");
   const [planMonthlyCalls, setPlanMonthlyCalls] = useState<number>(0);
   const [planMonthlyFee, setPlanMonthlyFee] = useState<number>(0);
-  const [planStartMonth, setPlanStartMonth] = useState<string | null>(null);
+  const [planStartMonth, setPlanStartMonth] = useState<string | null>(null); // for header display
   const [planOverageFee, setPlanOverageFee] = useState<number>(0);
   const [callsThisMonth, setCallsThisMonth] = useState<number>(0);
 
@@ -394,7 +388,8 @@ export default function AssistantDashboardVapi({
     planMonthlyCalls: number;
     planMonthlyFee: number;
     planOverageFee: number;
-    planStartMonth: string | null;
+    planStartMonth: string | null; // label for header
+    planStartDate: Date | null;    // normalized first-of-month Date for logic
   } | null> {
     setPlanLoading(true);
     setPlanError(null);
@@ -413,38 +408,82 @@ export default function AssistantDashboardVapi({
         setPlanLoading(false);
         return null;
       }
-      const u = usersSnap.docs[0].data() as Record<string, unknown>;
+      const u = usersSnap.docs[0].data() as Record<string, any>;
 
-      // Resolve fields robustly (handles labels, camelCase, or weird spacing/case)
-      const _planName = String(
-        (getField<string>(u, ["Plan Name", "planName"]) ?? "—")
-      );
-      const _planMonthlyCalls = Number(
-        getField<number>(u, ["Plan Monthly Calls", "planMonthlyCalls"], 0) ?? 0
-      );
-      const _planMonthlyFee = Number(
-        getField<number>(u, ["Plan Monthly Fee", "planMonthlyFee"], 0) ?? 0
-      );
-      const _planOverageFee = Number(
-        getField<number>(u, ["Plan Overage Fee", "planOverageFee"], 0) ?? 0
-      );
-      const _planStartMonthRaw =
-        getField<string>(u, ["Plan Start Month", "planStartMonth"]) ?? null;
+      // Support both labeled and camelCase fields
+      const _planName = String(u["Plan Name"] ?? u.planName ?? "—");
+      const _planMonthlyCalls =
+        typeof u["Plan Monthly Calls"] === "number"
+          ? (u["Plan Monthly Calls"] as number)
+          : typeof u.planMonthlyCalls === "number"
+          ? (u.planMonthlyCalls as number)
+          : 0;
+      const _planMonthlyFee =
+        typeof u["Plan Monthly Fee"] === "number"
+          ? (u["Plan Monthly Fee"] as number)
+          : typeof u.planMonthlyFee === "number"
+          ? (u.planMonthlyFee as number)
+          : 0;
+      const _planOverageFee =
+        typeof u["Plan Overage Fee"] === "number"
+          ? (u["Plan Overage Fee"] as number)
+          : typeof u.planOverageFee === "number"
+          ? (u.planOverageFee as number)
+          : 0;
 
-      // Update state
+      // --- Plan Start Month: prefer Timestamp/epoch, fallback to string ---
+      // Accept: "Plan Start Month" (Timestamp or string), planStartMonthTs (Timestamp),
+      //         planStartMonthMs (number epoch), planStartMonth (string)
+      const rawStart =
+        u["Plan Start Month"] ??
+        u.planStartMonthTs ??
+        u.planStartMonthMs ??
+        u.planStartMonth;
+
+      let _planStartDate: Date | null = null;
+      let _planStartMonthLabel: string | null = null;
+
+      if (rawStart && typeof rawStart?.toDate === "function") {
+        // Firestore Timestamp
+        _planStartDate = rawStart.toDate();
+      } else if (typeof rawStart === "number" && isFinite(rawStart)) {
+        // epoch ms
+        _planStartDate = new Date(rawStart);
+      } else if (typeof rawStart === "string") {
+        // legacy string
+        const parsed = parsePlanStartMonth(rawStart);
+        if (parsed) _planStartDate = parsed;
+        else _planStartMonthLabel = rawStart; // at least show in header
+      }
+
+      // Normalize to first day of month (local)
+      if (_planStartDate) {
+        _planStartDate = new Date(
+          _planStartDate.getFullYear(),
+          _planStartDate.getMonth(),
+          1, 0, 0, 0, 0
+        );
+        _planStartMonthLabel = _planStartDate.toLocaleString(undefined, {
+          month: "long",
+          year: "numeric",
+        });
+      }
+
+      // Update header state
       setPlanName(_planName);
       setPlanMonthlyCalls(_planMonthlyCalls);
       setPlanMonthlyFee(_planMonthlyFee);
       setPlanOverageFee(_planOverageFee);
-      setPlanStartMonth(_planStartMonthRaw);
+      setPlanStartMonth(_planStartMonthLabel);
 
-      // Return fresh values to callers to avoid timing issues
+      // Return fresh values to callers (used by invoice loader)
       return {
         planName: _planName,
         planMonthlyCalls: _planMonthlyCalls,
         planMonthlyFee: _planMonthlyFee,
         planOverageFee: _planOverageFee,
-        planStartMonth: _planStartMonthRaw,
+        planStartMonth: _planStartMonthLabel,
+        planStartDate: _planStartDate,
       };
     } catch (e) {
       setPlanError(
@@ -531,7 +570,8 @@ export default function AssistantDashboardVapi({
     planMonthlyCalls?: number;
     planMonthlyFee?: number;
     planOverageFee?: number;
-    planStartMonth?: string | null;
+    planStartMonth?: string | null; // unused for logic, display only
+    planStartDate?: Date | null;    // preferred source for logic
   }) {
     // Only block on planLoading if we DON'T have an override
     if (!override && (planLoading || planError)) return;
@@ -546,11 +586,17 @@ export default function AssistantDashboardVapi({
       const pCalls = override?.planMonthlyCalls ?? planMonthlyCalls;
       const pFee = override?.planMonthlyFee ?? planMonthlyFee;
       const pOver = override?.planOverageFee ?? planOverageFee;
-      const pStartStr = override?.planStartMonth ?? planStartMonth;
 
-      const parsedStart = parsePlanStartMonth(pStartStr ?? undefined);
+      // Prefer Timestamp-resolved Date if provided; fallback to parsing legacy header label
+      const pStartDate =
+        override?.planStartDate ??
+        null; // if null, we try to parse the string below
+
+      const parsedStart =
+        pStartDate ??
+        parsePlanStartMonth(override?.planStartMonth ?? planStartMonth ?? undefined);
+
       const startFromPlan = parsedStart ?? startOfMonth(now);
-
       const months = monthRangeInclusive(startFromPlan, now);
 
       const rows: InvoiceRow[] = [];
