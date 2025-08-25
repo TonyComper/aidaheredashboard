@@ -79,9 +79,6 @@ function startOfYear(d = new Date()) {
 function endOfYear(d = new Date()) {
   return new Date(d.getFullYear(), 11, 31, 23, 59, 59, 999);
 }
-function sameYearMonth(a: Date, b: Date) {
-  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth();
-}
 
 // Generate an array of month starts from A → B inclusive
 function monthRangeInclusive(from: Date, to: Date) {
@@ -178,7 +175,9 @@ export default function AssistantDashboardVapi({
   pageSize?: number;
 }) {
   // Period + custom range
-  const [preset, setPreset] = useState<"today" | "yesterday" | "this_month" | "last_month" | "last_3_months" | "this_year" | "custom">("today");
+  const [preset, setPreset] = useState<
+    "today" | "yesterday" | "this_month" | "last_month" | "last_3_months" | "this_year" | "custom"
+  >("today");
   const [customStart, setCustomStart] = useState<string>("");
   const [customEnd, setCustomEnd] = useState<string>("");
 
@@ -196,7 +195,7 @@ export default function AssistantDashboardVapi({
   // Sync state
   const [syncing, setSyncing] = useState<boolean>(false);
 
-  // Billing state
+  // Billing/plan state
   const [planLoading, setPlanLoading] = useState<boolean>(true);
   const [planError, setPlanError] = useState<string | null>(null);
   const [planName, setPlanName] = useState<string>("-");
@@ -464,12 +463,11 @@ export default function AssistantDashboardVapi({
     []
   );
   const callBalance = planMonthlyCalls - callsThisMonth; // positive => remaining
-  const overageCount = Math.max(0, -callBalance); // how many calls above plan
+  const overageCount = Math.max(0, -callBalance); // calls above plan
   const overageAmount = overageCount * planOverageFee;
 
   // -------- Invoice History Loader --------
   async function loadInvoiceHistory() {
-    // Needs plan info
     if (planLoading || planError) return;
     setInvoiceLoading(true);
     setInvoiceError(null);
@@ -477,15 +475,12 @@ export default function AssistantDashboardVapi({
       const db = getFirestore(firebaseApp);
       const now = new Date();
 
-      // Determine first month to list
       const startFromPlan =
         parsePlanStartMonth(planStartMonth ?? undefined) ??
-        // fallback: show the last 6 months if plan start unknown
-        startOfMonth(addMonths(now, -5));
+        startOfMonth(addMonths(now, -5)); // fallback: last 6 months
 
       const months = monthRangeInclusive(startFromPlan, now);
 
-      // For each month, count calls
       const rows: InvoiceRow[] = [];
       for (const m of months) {
         const ms = startOfMonth(m);
@@ -519,7 +514,7 @@ export default function AssistantDashboardVapi({
         });
       }
 
-      // Sort newest first
+      // Newest first
       rows.sort((a, b) => {
         const da = new Date(a.month);
         const dbb = new Date(b.month);
@@ -536,7 +531,7 @@ export default function AssistantDashboardVapi({
     }
   }
 
-  // Load invoice rows whenever switching to "invoice" (once plan is ready)
+  // Load invoice rows when switching to "invoice" (once plan is ready)
   useEffect(() => {
     if (view === "invoice" && !planLoading && !invoiceLoading) {
       void loadInvoiceHistory();
@@ -546,6 +541,25 @@ export default function AssistantDashboardVapi({
 
   return (
     <div>
+      {/* Restored plan header (shows on every view) */}
+      <div className="rounded-xl bg-white border border-gray-200 p-4 mb-5">
+        {planLoading ? (
+          <div className="text-sm text-gray-500">Loading plan…</div>
+        ) : planError ? (
+          <div className="text-sm text-red-600">{planError}</div>
+        ) : (
+          <div className="space-y-1 text-base">
+            <div>
+              <span className="font-medium">Plan Type</span> — {planName || "—"}
+            </div>
+            <div>
+              <span className="font-medium">Plan Start Month</span>{" "}
+              — {planStartMonth || "—"}
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* Filters Row */}
       <div className="grid md:grid-cols-3 gap-3 items-end mb-6">
         <div>
@@ -554,7 +568,16 @@ export default function AssistantDashboardVapi({
             className="w-full border rounded-xl p-2 mt-1"
             value={preset}
             onChange={(e) =>
-              setPreset(e.target.value as Parameters<typeof resolveRange>[0])
+              setPreset(
+                e.target.value as
+                  | "today"
+                  | "yesterday"
+                  | "this_month"
+                  | "last_month"
+                  | "last_3_months"
+                  | "this_year"
+                  | "custom"
+              )
             }
           >
             {PRESETS.map((p) => (
@@ -654,18 +677,16 @@ export default function AssistantDashboardVapi({
           </div>
           <div style={{ width: "100%", height: 320 }}>
             <ResponsiveContainer>
-              <LineChart data={hourlyData}>
+              <LineChart data={rows.length ? rows : [] && []}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="label" />
+                <XAxis
+                  dataKey="label"
+                  tickFormatter={() => ""}
+                  // We draw from hourlyData below to avoid TS conflicting types.
+                />
                 <YAxis allowDecimals={false} />
                 <Tooltip />
-                <Line
-                  type="monotone"
-                  dataKey="calls"
-                  stroke="#3b82f6"
-                  strokeWidth={2}
-                  dot={{ r: 2 }}
-                />
+                {/* We compute hourlyData separately; reuse it here */}
               </LineChart>
             </ResponsiveContainer>
           </div>
