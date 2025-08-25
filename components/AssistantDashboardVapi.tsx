@@ -177,17 +177,15 @@ function parsePlanStartMonth(input?: string | null): Date | null {
   if (!input) return null;
 
   const cleaned = String(input)
-    .replace(/[–—]/g, " ") // dashes → space
-    .replace(/,/g, " ") // commas → space
-    .replace(/\u00A0/g, " ") // NBSP → space
-    .replace(/\s+/g, " ") // collapse spaces
+    .replace(/[–—]/g, " ")
+    .replace(/,/g, " ")
+    .replace(/\u00A0/g, " ")
+    .replace(/\s+/g, " ")
     .trim();
 
-  // 1) Native parsing handles "August 2025" / "Aug 2025"
   const d1 = new Date(cleaned);
   if (!isNaN(d1.getTime())) return startOfMonth(d1);
 
-  // 2) YYYY-MM or YYYY/MM
   let m = cleaned.match(/^(\d{4})[-/](\d{1,2})$/);
   if (m) {
     const year = parseInt(m[1], 10);
@@ -195,7 +193,6 @@ function parsePlanStartMonth(input?: string | null): Date | null {
     if (month >= 0 && month < 12) return new Date(year, month, 1, 0, 0, 0, 0);
   }
 
-  // 3) MM-YYYY or MM/YYYY
   m = cleaned.match(/^(\d{1,2})[-/](\d{4})$/);
   if (m) {
     const month = parseInt(m[1], 10) - 1;
@@ -314,10 +311,10 @@ export default function AssistantDashboardVapi({
       void loadData();
       void loadBillingUsage();
 
-      // Ensure plan is fresh; then (if needed) rebuild invoice
-      await loadBillingPlan();
+      // Ensure plan is fresh; then (if needed) rebuild invoice with fresh plan
+      const fresh = await loadBillingPlan();
       if (view === "invoice") {
-        await loadInvoiceHistory();
+        await loadInvoiceHistory(fresh ?? undefined);
       }
     }
   }
@@ -372,7 +369,13 @@ export default function AssistantDashboardVapi({
   }, [assistantId, start.getTime(), end.getTime()]);
 
   // -------- BILLING (plan + usage) ----------
-  async function loadBillingPlan() {
+  async function loadBillingPlan(): Promise<{
+    planName: string;
+    planMonthlyCalls: number;
+    planMonthlyFee: number;
+    planOverageFee: number;
+    planStartMonth: string | null;
+  } | null> {
     setPlanLoading(true);
     setPlanError(null);
     try {
@@ -388,44 +391,57 @@ export default function AssistantDashboardVapi({
       if (usersSnap.empty) {
         setPlanError("No user profile found for this assistant.");
         setPlanLoading(false);
-        return;
+        return null;
       }
       const u = usersSnap.docs[0].data() as Record<string, unknown>;
 
       // Support both labeled and camelCase fields
-      setPlanName(String(u["Plan Name"] ?? u.planName ?? "—"));
-      setPlanMonthlyCalls(
+      const _planName = String(u["Plan Name"] ?? u.planName ?? "—");
+      const _planMonthlyCalls =
         typeof u["Plan Monthly Calls"] === "number"
           ? (u["Plan Monthly Calls"] as number)
           : typeof u.planMonthlyCalls === "number"
           ? (u.planMonthlyCalls as number)
-          : 0
-      );
-      setPlanMonthlyFee(
+          : 0;
+      const _planMonthlyFee =
         typeof u["Plan Monthly Fee"] === "number"
           ? (u["Plan Monthly Fee"] as number)
           : typeof u.planMonthlyFee === "number"
           ? (u.planMonthlyFee as number)
-          : 0
-      );
-      setPlanOverageFee(
+          : 0;
+      const _planOverageFee =
         typeof u["Plan Overage Fee"] === "number"
           ? (u["Plan Overage Fee"] as number)
           : typeof u.planOverageFee === "number"
           ? (u.planOverageFee as number)
-          : 0
-      );
-      setPlanStartMonth(
+          : 0;
+      const _planStartMonth =
         typeof u["Plan Start Month"] === "string"
           ? (u["Plan Start Month"] as string)
           : typeof u.planStartMonth === "string"
           ? (u.planStartMonth as string)
-          : null
-      );
+          : null;
+
+      // Update state (existing behavior)
+      setPlanName(_planName);
+      setPlanMonthlyCalls(_planMonthlyCalls);
+      setPlanMonthlyFee(_planMonthlyFee);
+      setPlanOverageFee(_planOverageFee);
+      setPlanStartMonth(_planStartMonth);
+
+      // Return fresh values to callers to avoid timing issues
+      return {
+        planName: _planName,
+        planMonthlyCalls: _planMonthlyCalls,
+        planMonthlyFee: _planMonthlyFee,
+        planOverageFee: _planOverageFee,
+        planStartMonth: _planStartMonth,
+      };
     } catch (e) {
       setPlanError(
         e instanceof Error ? e.message : "Failed to load billing plan."
       );
+      return null;
     } finally {
       setPlanLoading(false);
     }
@@ -501,7 +517,13 @@ export default function AssistantDashboardVapi({
   const overageAmount = overageCount * planOverageFee;
 
   // -------- Invoice History Loader --------
-  async function loadInvoiceHistory() {
+  async function loadInvoiceHistory(override?: {
+    planName?: string;
+    planMonthlyCalls?: number;
+    planMonthlyFee?: number;
+    planOverageFee?: number;
+    planStartMonth?: string | null;
+  }) {
     if (planLoading || planError) return;
     setInvoiceLoading(true);
     setInvoiceError(null);
@@ -509,8 +531,13 @@ export default function AssistantDashboardVapi({
       const db = getFirestore(firebaseApp);
       const now = new Date();
 
-      const parsedStart = parsePlanStartMonth(planStartMonth ?? undefined);
-      // If parsing fails, keep to current month (never show pre-plan months)
+      const pName = override?.planName ?? planName;
+      const pCalls = override?.planMonthlyCalls ?? planMonthlyCalls;
+      const pFee = override?.planMonthlyFee ?? planMonthlyFee;
+      const pOver = override?.planOverageFee ?? planOverageFee;
+      const pStartStr = override?.planStartMonth ?? planStartMonth;
+
+      const parsedStart = parsePlanStartMonth(pStartStr ?? undefined);
       const startFromPlan = parsedStart ?? startOfMonth(now);
 
       const months = monthRangeInclusive(startFromPlan, now);
@@ -530,25 +557,24 @@ export default function AssistantDashboardVapi({
         const snap = await getDocs(qy);
         const actualCalls = snap.size;
 
-        const balance = planMonthlyCalls - actualCalls;
+        const balance = pCalls - actualCalls;
         const overCount = Math.max(0, -balance);
-        const overage = overCount * planOverageFee;
-        const total = planMonthlyFee + overage;
+        const overage = overCount * pOver;
+        const total = pFee + overage;
 
         rows.push({
           month: fmtMonth(ms),
-          planName,
-          planMonthlyFee: planMonthlyFee,
-          planMonthlyCalls: planMonthlyCalls,
+          planName: pName,
+          planMonthlyFee: pFee,
+          planMonthlyCalls: pCalls,
           actualCalls,
           callBalance: balance,
-          callOverageFee: planOverageFee,
+          callOverageFee: pOver,
           calculatedOverage: overage,
           totalInvoice: total,
         });
       }
 
-      // Newest first
       rows.sort((a, b) => {
         const da = new Date(a.month);
         const dbb = new Date(b.month);
@@ -565,15 +591,15 @@ export default function AssistantDashboardVapi({
     }
   }
 
-  // 🔁 Reload plan then invoice when switching to Invoice view
+  // 🔁 Reload plan then invoice when switching to Invoice view (using fresh values)
   useEffect(() => {
     if (view === "invoice") {
       (async () => {
-        await loadBillingPlan();
-        await loadInvoiceHistory();
+        const fresh = await loadBillingPlan();
+        await loadInvoiceHistory(fresh ?? undefined);
       })();
     }
-  }, [view, assistantId]);
+  }, [view, assistantId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div>
@@ -727,7 +753,7 @@ export default function AssistantDashboardVapi({
             </div>
           </div>
 
-        {planLoading ? (
+          {planLoading ? (
             <div className="text-gray-500">Loading plan…</div>
           ) : planError ? (
             <div className="text-red-600">{planError}</div>
