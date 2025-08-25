@@ -429,13 +429,28 @@ export default function AssistantDashboardVapi({
   const callBalance = planMonthlyCalls - callsThisMonth; // positive => remaining
   const overageCount = Math.max(0, -callBalance); // how many calls above plan
   const overageAmount = overageCount * planOverageFee;
-  const monthlyPct =
-    planMonthlyCalls > 0
-      ? Math.min(100, (callsThisMonth / planMonthlyCalls) * 100)
-      : 0;
 
   return (
     <div>
+      {/* ---- Plan Header under the page title ---- */}
+      <div className="rounded-xl bg-white border border-gray-200 p-4 mb-5">
+        {planLoading ? (
+          <div className="text-sm text-gray-500">Loading plan…</div>
+        ) : planError ? (
+          <div className="text-sm text-red-600">{planError}</div>
+        ) : (
+          <div className="space-y-1 text-base">
+            <div>
+              <span className="font-medium">Plan Type</span> — {planName || "—"}
+            </div>
+            <div>
+              <span className="font-medium">Plan Start Month</span>{" "}
+              — {planStartMonth || "—"}
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* Filters Row */}
       <div className="grid md:grid-cols-3 gap-3 items-end mb-6">
         <div>
