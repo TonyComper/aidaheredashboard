@@ -80,6 +80,50 @@ function endOfYear(d = new Date()) {
   return new Date(d.getFullYear(), 11, 31, 23, 59, 59, 999);
 }
 
+const PRESETS = [
+  { key: "today", label: "Today" },
+  { key: "yesterday", label: "Yesterday" },
+  { key: "this_month", label: "This Month" },
+  { key: "last_month", label: "Last Month" },
+  { key: "last_3_months", label: "Last 3 Months" },
+  { key: "this_year", label: "This Year" },
+  { key: "custom", label: "Custom Range" },
+] as const;
+
+type PresetKey = (typeof PRESETS)[number]["key"];
+
+function resolveRange(
+  preset: PresetKey,
+  custom?: { start?: Date; end?: Date }
+) {
+  const now = new Date();
+  switch (preset) {
+    case "today":
+      return { start: startOfDay(now), end: endOfDay(now) };
+    case "yesterday": {
+      const y = new Date(now);
+      y.setDate(now.getDate() - 1);
+      return { start: startOfDay(y), end: endOfDay(y) };
+    }
+    case "this_month":
+      return { start: startOfMonth(now), end: endOfMonth(now) };
+    case "last_month": {
+      const prev = addMonths(now, -1);
+      return { start: startOfMonth(prev), end: endOfMonth(prev) };
+    }
+    case "last_3_months":
+      return { start: startOfMonth(addMonths(now, -2)), end: endOfMonth(now) };
+    case "this_year":
+      return { start: startOfYear(now), end: endOfYear(now) };
+    case "custom":
+    default:
+      return {
+        start: custom?.start ?? startOfMonth(now),
+        end: custom?.end ?? endOfDay(now),
+      };
+  }
+}
+
 // Generate an array of month starts from A → B inclusive
 function monthRangeInclusive(from: Date, to: Date) {
   const out: Date[] = [];
@@ -127,11 +171,38 @@ function fmtTime(ts?: Timestamp | null) {
 function fmtMonth(d: Date) {
   return d.toLocaleString(undefined, { month: "long", year: "numeric" });
 }
-function parsePlanStartMonth(s?: string | null): Date | null {
-  if (!s) return null;
-  // Expect formats like "August 2025"
-  const d = new Date(s);
-  if (!isNaN(d.getTime())) return startOfMonth(d);
+
+// Robust parser for "Plan Start Month"
+function parsePlanStartMonth(input?: string | null): Date | null {
+  if (!input) return null;
+
+  const cleaned = String(input)
+    .replace(/[–—]/g, " ") // dashes → space
+    .replace(/,/g, " ") // commas → space
+    .replace(/\u00A0/g, " ") // NBSP → space
+    .replace(/\s+/g, " ") // collapse spaces
+    .trim();
+
+  // 1) Native parsing handles "August 2025" / "Aug 2025"
+  const d1 = new Date(cleaned);
+  if (!isNaN(d1.getTime())) return startOfMonth(d1);
+
+  // 2) YYYY-MM or YYYY/MM
+  let m = cleaned.match(/^(\d{4})[-/](\d{1,2})$/);
+  if (m) {
+    const year = parseInt(m[1], 10);
+    const month = parseInt(m[2], 10) - 1;
+    if (month >= 0 && month < 12) return new Date(year, month, 1, 0, 0, 0, 0);
+  }
+
+  // 3) MM-YYYY or MM/YYYY
+  m = cleaned.match(/^(\d{1,2})[-/](\d{4})$/);
+  if (m) {
+    const month = parseInt(m[1], 10) - 1;
+    const year = parseInt(m[2], 10);
+    if (month >= 0 && month < 12) return new Date(year, month, 1, 0, 0, 0, 0);
+  }
+
   return null;
 }
 
@@ -175,9 +246,7 @@ export default function AssistantDashboardVapi({
   pageSize?: number;
 }) {
   // Period + custom range
-  const [preset, setPreset] = useState<
-    "today" | "yesterday" | "this_month" | "last_month" | "last_3_months" | "this_year" | "custom"
-  >("today");
+  const [preset, setPreset] = useState<PresetKey>("today");
   const [customStart, setCustomStart] = useState<string>("");
   const [customEnd, setCustomEnd] = useState<string>("");
 
@@ -189,13 +258,13 @@ export default function AssistantDashboardVapi({
   // Drawer
   const [drawerId, setDrawerId] = useState<string | null>(null);
 
-  // View switch (+ Billing)
+  // View switch (+ Billing + Invoice)
   const [view, setView] = useState<ViewMode>("log");
 
   // Sync state
   const [syncing, setSyncing] = useState<boolean>(false);
 
-  // Billing/plan state
+  // Billing state
   const [planLoading, setPlanLoading] = useState<boolean>(true);
   const [planError, setPlanError] = useState<string | null>(null);
   const [planName, setPlanName] = useState<string>("-");
@@ -205,65 +274,23 @@ export default function AssistantDashboardVapi({
   const [planOverageFee, setPlanOverageFee] = useState<number>(0);
   const [callsThisMonth, setCallsThisMonth] = useState<number>(0);
 
-  // -------- INVOICE HISTORY --------
+  // INVOICE HISTORY
   type InvoiceRow = {
-    month: string; // "August 2025"
+    month: string; // e.g., "August 2025"
     planName: string;
     planMonthlyFee: number;
     planMonthlyCalls: number;
     actualCalls: number;
     callBalance: number; // remaining (can be negative)
     callOverageFee: number;
-    calculatedOverage: number; // dollars
+    calculatedOverage: number; // $
     totalInvoice: number; // monthly fee + overage
   };
   const [invoiceLoading, setInvoiceLoading] = useState<boolean>(false);
   const [invoiceError, setInvoiceError] = useState<string | null>(null);
   const [invoiceRows, setInvoiceRows] = useState<InvoiceRow[]>([]);
 
-  // ----------------- Date range (local time) -----------------
-  const PRESETS = [
-    { key: "today", label: "Today" },
-    { key: "yesterday", label: "Yesterday" },
-    { key: "this_month", label: "This Month" },
-    { key: "last_month", label: "Last Month" },
-    { key: "last_3_months", label: "Last 3 Months" },
-    { key: "this_year", label: "This Year" },
-    { key: "custom", label: "Custom Range" },
-  ] as const;
-
-  function resolveRange(
-    preset: typeof PRESETS[number]["key"],
-    custom?: { start?: Date; end?: Date }
-  ) {
-    const now = new Date();
-    switch (preset) {
-      case "today":
-        return { start: startOfDay(now), end: endOfDay(now) };
-      case "yesterday": {
-        const y = new Date(now);
-        y.setDate(now.getDate() - 1);
-        return { start: startOfDay(y), end: endOfDay(y) };
-      }
-      case "this_month":
-        return { start: startOfMonth(now), end: endOfMonth(now) };
-      case "last_month": {
-        const prev = addMonths(now, -1);
-        return { start: startOfMonth(prev), end: endOfMonth(prev) };
-      }
-      case "last_3_months":
-        return { start: startOfMonth(addMonths(now, -2)), end: endOfMonth(now) };
-      case "this_year":
-        return { start: startOfYear(now), end: endOfYear(now) };
-      case "custom":
-      default:
-        return {
-          start: custom?.start ?? startOfMonth(now),
-          end: custom?.end ?? endOfDay(now),
-        };
-    }
-  }
-
+  // Resolve the date range (local time)
   const { start, end } = useMemo(() => {
     const cs = customStart ? new Date(customStart) : undefined;
     const ce = customEnd ? new Date(customEnd) : undefined;
@@ -346,6 +373,7 @@ export default function AssistantDashboardVapi({
     try {
       const db = getFirestore(firebaseApp);
 
+      // Find the user document by assistantId
       const usersQ = query(
         collection(db, "users"),
         where("assistantId", "==", assistantId),
@@ -359,6 +387,7 @@ export default function AssistantDashboardVapi({
       }
       const u = usersSnap.docs[0].data() as Record<string, unknown>;
 
+      // Support both labeled and camelCase fields
       setPlanName(String(u["Plan Name"] ?? u.planName ?? "—"));
       setPlanMonthlyCalls(
         typeof u["Plan Monthly Calls"] === "number"
@@ -463,7 +492,7 @@ export default function AssistantDashboardVapi({
     []
   );
   const callBalance = planMonthlyCalls - callsThisMonth; // positive => remaining
-  const overageCount = Math.max(0, -callBalance); // calls above plan
+  const overageCount = Math.max(0, -callBalance); // how many calls above plan
   const overageAmount = overageCount * planOverageFee;
 
   // -------- Invoice History Loader --------
@@ -475,9 +504,9 @@ export default function AssistantDashboardVapi({
       const db = getFirestore(firebaseApp);
       const now = new Date();
 
-      const startFromPlan =
-        parsePlanStartMonth(planStartMonth ?? undefined) ??
-        startOfMonth(addMonths(now, -5)); // fallback: last 6 months
+      const parsedStart = parsePlanStartMonth(planStartMonth ?? undefined);
+      // If parsing fails, keep to current month (never show pre-plan months)
+      const startFromPlan = parsedStart ?? startOfMonth(now);
 
       const months = monthRangeInclusive(startFromPlan, now);
 
@@ -533,15 +562,20 @@ export default function AssistantDashboardVapi({
 
   // Load invoice rows when switching to "invoice" (once plan is ready)
   useEffect(() => {
-    if (view === "invoice" && !planLoading && !invoiceLoading) {
+    if (
+      view === "invoice" &&
+      !planLoading &&
+      !invoiceLoading &&
+      planStartMonth !== null
+    ) {
       void loadInvoiceHistory();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, planLoading, assistantId]);
+  }, [view, planLoading, planStartMonth, assistantId]);
 
   return (
     <div>
-      {/* Restored plan header (shows on every view) */}
+      {/* Plan header (shows on every view) */}
       <div className="rounded-xl bg-white border border-gray-200 p-4 mb-5">
         {planLoading ? (
           <div className="text-sm text-gray-500">Loading plan…</div>
@@ -553,8 +587,8 @@ export default function AssistantDashboardVapi({
               <span className="font-medium">Plan Type</span> — {planName || "—"}
             </div>
             <div>
-              <span className="font-medium">Plan Start Month</span>{" "}
-              — {planStartMonth || "—"}
+              <span className="font-medium">Plan Start Month</span> —{" "}
+              {planStartMonth || "—"}
             </div>
           </div>
         )}
@@ -567,18 +601,7 @@ export default function AssistantDashboardVapi({
           <select
             className="w-full border rounded-xl p-2 mt-1"
             value={preset}
-            onChange={(e) =>
-              setPreset(
-                e.target.value as
-                  | "today"
-                  | "yesterday"
-                  | "this_month"
-                  | "last_month"
-                  | "last_3_months"
-                  | "this_year"
-                  | "custom"
-              )
-            }
+            onChange={(e) => setPreset(e.target.value as PresetKey)}
           >
             {PRESETS.map((p) => (
               <option key={p.key} value={p.key}>
@@ -677,16 +700,18 @@ export default function AssistantDashboardVapi({
           </div>
           <div style={{ width: "100%", height: 320 }}>
             <ResponsiveContainer>
-              <LineChart data={rows.length ? rows : [] && []}>
+              <LineChart data={hourlyData}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis
-                  dataKey="label"
-                  tickFormatter={() => ""}
-                  // We draw from hourlyData below to avoid TS conflicting types.
-                />
+                <XAxis dataKey="label" />
                 <YAxis allowDecimals={false} />
                 <Tooltip />
-                {/* We compute hourlyData separately; reuse it here */}
+                <Line
+                  type="monotone"
+                  dataKey="calls"
+                  stroke="#3b82f6"
+                  strokeWidth={2}
+                  dot={{ r: 2 }}
+                />
               </LineChart>
             </ResponsiveContainer>
           </div>
