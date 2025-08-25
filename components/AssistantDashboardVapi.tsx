@@ -313,6 +313,7 @@ export default function AssistantDashboardVapi({
       setSyncing(false);
       void loadData();
       void loadBillingUsage();
+      void loadBillingPlan();             // ✅ NEW: refresh plan fields from Firestore
       if (view === "invoice") void loadInvoiceHistory();
     }
   }
@@ -572,6 +573,13 @@ export default function AssistantDashboardVapi({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, planLoading, planStartMonth, assistantId]);
+
+  // ✅ NEW: always reload plan when switching to Invoice view
+  useEffect(() => {
+    if (view === "invoice") {
+      void loadBillingPlan();
+    }
+  }, [view]);
 
   return (
     <div>
