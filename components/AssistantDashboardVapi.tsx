@@ -309,18 +309,18 @@ export default function AssistantDashboardVapi({
       await fetch(`/api/vapi/sync?${params}`, { method: "GET" });
     } catch {
       // ignore
-} finally {
-  setSyncing(false);
-  void loadData();
-  void loadBillingUsage();
+    } finally {
+      setSyncing(false);
+      void loadData();
+      void loadBillingUsage();
 
-  // ⬇️ Wait for plan to finish loading, then (if needed) build invoice
-  await loadBillingPlan();
-  if (view === "invoice") {
-    await loadInvoiceHistory();
+      // Ensure plan is fresh; then (if needed) rebuild invoice
+      await loadBillingPlan();
+      if (view === "invoice") {
+        await loadInvoiceHistory();
+      }
+    }
   }
-}
-
 
   // -------- DATA (call logs) ----------
   async function loadData() {
@@ -565,16 +565,15 @@ export default function AssistantDashboardVapi({
     }
   }
 
-  // Load invoice rows when switching to "invoice" (once plan is ready)
-// Reload plan and then invoice when switching to Invoice view
-useEffect(() => {
-  if (view === "invoice") {
-    (async () => {
-      await loadBillingPlan();
-      await loadInvoiceHistory();
-    })();
-  }
-}, [view, assistantId]);
+  // 🔁 Reload plan then invoice when switching to Invoice view
+  useEffect(() => {
+    if (view === "invoice") {
+      (async () => {
+        await loadBillingPlan();
+        await loadInvoiceHistory();
+      })();
+    }
+  }, [view, assistantId]);
 
   return (
     <div>
@@ -728,7 +727,7 @@ useEffect(() => {
             </div>
           </div>
 
-          {planLoading ? (
+        {planLoading ? (
             <div className="text-gray-500">Loading plan…</div>
           ) : planError ? (
             <div className="text-red-600">{planError}</div>
