@@ -309,14 +309,18 @@ export default function AssistantDashboardVapi({
       await fetch(`/api/vapi/sync?${params}`, { method: "GET" });
     } catch {
       // ignore
-    } finally {
-      setSyncing(false);
-      void loadData();
-      void loadBillingUsage();
-      void loadBillingPlan();             // ✅ NEW: refresh plan fields from Firestore
-      if (view === "invoice") void loadInvoiceHistory();
-    }
+} finally {
+  setSyncing(false);
+  void loadData();
+  void loadBillingUsage();
+
+  // ⬇️ Wait for plan to finish loading, then (if needed) build invoice
+  await loadBillingPlan();
+  if (view === "invoice") {
+    await loadInvoiceHistory();
   }
+}
+
 
   // -------- DATA (call logs) ----------
   async function loadData() {
@@ -562,24 +566,15 @@ export default function AssistantDashboardVapi({
   }
 
   // Load invoice rows when switching to "invoice" (once plan is ready)
-  useEffect(() => {
-    if (
-      view === "invoice" &&
-      !planLoading &&
-      !invoiceLoading &&
-      planStartMonth !== null
-    ) {
-      void loadInvoiceHistory();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, planLoading, planStartMonth, assistantId]);
-
-  // ✅ NEW: always reload plan when switching to Invoice view
-  useEffect(() => {
-    if (view === "invoice") {
-      void loadBillingPlan();
-    }
-  }, [view]);
+// Reload plan and then invoice when switching to Invoice view
+useEffect(() => {
+  if (view === "invoice") {
+    (async () => {
+      await loadBillingPlan();
+      await loadInvoiceHistory();
+    })();
+  }
+}, [view, assistantId]);
 
   return (
     <div>
