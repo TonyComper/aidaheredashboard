@@ -6,6 +6,7 @@ import {
   collection,
   getDocs,
   getFirestore,
+  limit,
   orderBy,
   query,
   Timestamp,
@@ -19,11 +20,7 @@ const ResponsiveContainer = dynamic(
   async () => (await import("recharts")).ResponsiveContainer,
   { ssr: false }
 );
-const LineChart = dynamic(async () => (await import("recharts")).Line, {
-  // 👆 import "LineChart" from recharts as .LineChart actually (typo fix below)
-} as any) as unknown as typeof import("recharts").LineChart;
-// (Small TS shim because dynamic typing can be fussy on some setups)
-const _LineChart = dynamic(async () => (await import("recharts")).LineChart, {
+const LineChart = dynamic(async () => (await import("recharts")).LineChart, {
   ssr: false,
 });
 const Line = dynamic(async () => (await import("recharts")).Line, {
@@ -56,7 +53,7 @@ type CallRow = {
   transcript?: string | null;
 };
 
-type ViewMode = "log" | "hourly";
+type ViewMode = "log" | "hourly" | "billing";
 
 // ----------------- Local-time date helpers -----------------
 function startOfDay(d = new Date()) {
@@ -131,6 +128,13 @@ function resolveRange(
 function nf(n: number, opts?: Intl.NumberFormatOptions) {
   return new Intl.NumberFormat(undefined, opts).format(n);
 }
+function usd(n: number) {
+  return new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 2,
+  }).format(n);
+}
 function minutesFromSeconds(s?: number | null) {
   return (s ?? 0) / 60;
 }
@@ -153,14 +157,6 @@ function fmtTime(ts?: Timestamp | null) {
     : "—";
 }
 
-// ---- Hour label helpers (fixed 12AM → 11PM) ----
-const HOUR_LABELS = Array.from({ length: 24 }, (_, h) => {
-  const hour12 = ((h + 11) % 12) + 1; // 0 -> 12, 13 -> 1
-  const ampm = h < 12 ? "AM" : "PM";
-  return `${hour12} ${ampm}`;
-});
-HOUR_LABELS[0] = "12 AM"; // ensure midnight reads nicely
-
 function KpiCard({
   title,
   value,
@@ -173,8 +169,20 @@ function KpiCard({
   return (
     <div className="rounded-2xl shadow p-5 bg-white border border-gray-100">
       <div className="text-gray-500 text-sm">{title}</div>
-      <div className="text-3xl font-semibold mt-1">{value}</div>
+      <div className="text-3xl font-semibold mt-1 break-words">{value}</div>
       {subtitle && <div className="text-xs text-gray-400 mt-1">{subtitle}</div>}
+    </div>
+  );
+}
+
+function ProgressBar({ pct }: { pct: number }) {
+  const clamped = Math.max(0, Math.min(100, pct));
+  return (
+    <div className="w-full h-3 rounded-full bg-gray-200 overflow-hidden">
+      <div
+        className={`h-full ${clamped >= 100 ? "bg-red-500" : "bg-green-500"}`}
+        style={{ width: `${clamped}%` }}
+      />
     </div>
   );
 }
@@ -198,14 +206,24 @@ export default function AssistantDashboardVapi({
   const [rows, setRows] = useState<CallRow[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  // Sync state
-  const [syncing, setSyncing] = useState<boolean>(false);
-
   // Drawer
   const [drawerId, setDrawerId] = useState<string | null>(null);
 
-  // View switch
+  // View switch (+ Billing)
   const [view, setView] = useState<ViewMode>("log");
+
+  // Sync state
+  const [syncing, setSyncing] = useState<boolean>(false);
+
+  // Billing state
+  const [planLoading, setPlanLoading] = useState<boolean>(true);
+  const [planError, setPlanError] = useState<string | null>(null);
+  const [planName, setPlanName] = useState<string>("-");
+  const [planMonthlyCalls, setPlanMonthlyCalls] = useState<number>(0);
+  const [planMonthlyFee, setPlanMonthlyFee] = useState<number>(0);
+  const [planStartMonth, setPlanStartMonth] = useState<string | null>(null);
+  const [planOverageFee, setPlanOverageFee] = useState<number>(0);
+  const [callsThisMonth, setCallsThisMonth] = useState<number>(0);
 
   // Resolve the date range (local time)
   const { start, end } = useMemo(() => {
@@ -214,7 +232,7 @@ export default function AssistantDashboardVapi({
     return resolveRange(preset, { start: cs, end: ce });
   }, [preset, customStart, customEnd]);
 
-  // Sync now → pull from Vapi to Firestore (server-side), for THIS window
+  // -------- SYNC (server route) ----------
   async function syncNow() {
     setSyncing(true);
     try {
@@ -223,29 +241,23 @@ export default function AssistantDashboardVapi({
         start: start.toISOString(),
         end: end.toISOString(),
       });
-      const r = await fetch(`/api/vapi/sync?${params}`, { method: "GET" });
-      // Optional: if the route returns non-200, surface that
-      if (!r.ok) {
-        const t = await r.text().catch(() => "");
-        throw new Error(`Sync failed: ${r.status} ${t || ""}`);
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Sync failed.");
+      await fetch(`/api/vapi/sync?${params}`, { method: "GET" });
+    } catch {
+      // ignore
     } finally {
       setSyncing(false);
-      void loadData(); // refresh table after sync
+      void loadData();
+      void loadBillingUsage();
     }
   }
 
-  // Fetch from Firestore (client-side)
+  // -------- DATA (call logs) ----------
   async function loadData() {
     setLoading(true);
     setError(null);
     try {
       const db = getFirestore(firebaseApp);
       const col = collection(db, "callLogs");
-
-      // Requires composite index: where(assistantId==), orderBy(startTime), where(startTime>=), where(startTime<=)
       const qy = query(
         col,
         where("assistantId", "==", assistantId),
@@ -253,7 +265,6 @@ export default function AssistantDashboardVapi({
         where("startTime", ">=", Timestamp.fromDate(start)),
         where("startTime", "<=", Timestamp.fromDate(end))
       );
-
       const snap = await getDocs(qy);
       const arr: CallRow[] = snap.docs.slice(0, pageSize).map((d) => {
         const data = d.data() as Record<string, unknown>;
@@ -284,13 +295,99 @@ export default function AssistantDashboardVapi({
     }
   }
 
-  // Initial + whenever range/assistant changes
   useEffect(() => {
     void loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [assistantId, start.getTime(), end.getTime()]);
 
-  // KPI totals
+  // -------- BILLING (plan + usage) ----------
+  async function loadBillingPlan() {
+    setPlanLoading(true);
+    setPlanError(null);
+    try {
+      const db = getFirestore(firebaseApp);
+
+      // Find the user document by assistantId (or adjust to uid if desired)
+      const usersQ = query(
+        collection(db, "users"),
+        where("assistantId", "==", assistantId),
+        limit(1)
+      );
+      const usersSnap = await getDocs(usersQ);
+      if (usersSnap.empty) {
+        setPlanError("No user profile found for this assistant.");
+        setPlanLoading(false);
+        return;
+      }
+      const u = usersSnap.docs[0].data() as Record<string, unknown>;
+
+      // Support both exact labels and camelCase fallbacks
+      setPlanName(String(u["Plan Name"] ?? u.planName ?? "—"));
+      setPlanMonthlyCalls(
+        typeof u["Plan Monthly Calls"] === "number"
+          ? (u["Plan Monthly Calls"] as number)
+          : typeof u.planMonthlyCalls === "number"
+          ? (u.planMonthlyCalls as number)
+          : 0
+      );
+      setPlanMonthlyFee(
+        typeof u["Plan Monthly Fee"] === "number"
+          ? (u["Plan Monthly Fee"] as number)
+          : typeof u.planMonthlyFee === "number"
+          ? (u.planMonthlyFee as number)
+          : 0
+      );
+      setPlanOverageFee(
+        typeof u["Plan Overage Fee"] === "number"
+          ? (u["Plan Overage Fee"] as number)
+          : typeof u.planOverageFee === "number"
+          ? (u.planOverageFee as number)
+          : 0
+      );
+      setPlanStartMonth(
+        typeof u["Plan Start Month"] === "string"
+          ? (u["Plan Start Month"] as string)
+          : typeof u.planStartMonth === "string"
+          ? (u.planStartMonth as string)
+          : null
+      );
+    } catch (e) {
+      setPlanError(
+        e instanceof Error ? e.message : "Failed to load billing plan."
+      );
+    } finally {
+      setPlanLoading(false);
+    }
+  }
+
+  async function loadBillingUsage() {
+    try {
+      const db = getFirestore(firebaseApp);
+      const now = new Date();
+      const ms = startOfMonth(now);
+      const me = endOfMonth(now);
+
+      const qy = query(
+        collection(db, "callLogs"),
+        where("assistantId", "==", assistantId),
+        orderBy("startTime", "desc"),
+        where("startTime", ">=", Timestamp.fromDate(ms)),
+        where("startTime", "<=", Timestamp.fromDate(me))
+      );
+      const snap = await getDocs(qy);
+      setCallsThisMonth(snap.size);
+    } catch {
+      setCallsThisMonth(0);
+    }
+  }
+
+  useEffect(() => {
+    void loadBillingPlan();
+    void loadBillingUsage();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assistantId]);
+
+  // KPI totals for log/hourly
   const totalCalls = rows.length;
   const totalMinutes = useMemo(
     () =>
@@ -302,20 +399,40 @@ export default function AssistantDashboardVapi({
   );
   const avgMinutes = totalCalls ? totalMinutes / totalCalls : 0;
 
-  // Hourly Analysis dataset — fixed order: 12 AM → 11 PM
+  // Hourly Analysis dataset (midnight → 11 PM)
   const hourlyData = useMemo(() => {
-    const buckets = Array.from({ length: 24 }, () => 0);
+    const buckets = Array.from({ length: 24 }, (_, h) => ({
+      hour: h,
+      label: new Date(2000, 0, 1, h, 0, 0).toLocaleTimeString([], {
+        hour: "numeric",
+      }),
+      calls: 0,
+    }));
     rows.forEach((r) => {
       const d = tsToDate(r.startTime);
       if (!d) return;
-      const h = d.getHours(); // local hour 0..23
-      buckets[h] += 1;
+      const h = d.getHours();
+      buckets[h].calls += 1;
     });
-    return buckets.map((count, h) => ({
-      label: HOUR_LABELS[h],
-      calls: count,
-    }));
+    return buckets;
   }, [rows]);
+
+  // Billing computations
+  const monthLabel = useMemo(
+    () =>
+      new Date().toLocaleString(undefined, {
+        month: "long",
+        year: "numeric",
+      }),
+    []
+  );
+  const callBalance = planMonthlyCalls - callsThisMonth; // positive => remaining
+  const overageCount = Math.max(0, -callBalance); // how many calls above plan
+  const overageAmount = overageCount * planOverageFee;
+  const monthlyPct =
+    planMonthlyCalls > 0
+      ? Math.min(100, (callsThisMonth / planMonthlyCalls) * 100)
+      : 0;
 
   return (
     <div>
@@ -363,20 +480,16 @@ export default function AssistantDashboardVapi({
         <div className="flex items-center gap-3">
           <button
             onClick={syncNow}
+            className="px-3 py-2 rounded-xl border bg-white hover:bg-gray-50"
             disabled={syncing}
-            className={`px-3 py-2 rounded-xl border bg-white hover:bg-gray-50 ${
-              syncing ? "opacity-60 cursor-not-allowed" : ""
-            }`}
           >
-            Sync now
+            {syncing ? "Syncing…" : "Sync now"}
           </button>
-          <span
-            className="text-sm text-gray-600"
-            aria-live="polite"
-            aria-busy={syncing}
-          >
-            {syncing && "SYNC in PROGRESS. Please wait…"}
-          </span>
+          {syncing && (
+            <div className="text-sm text-blue-600">
+              SYNC in PROGRESS. Please wait…
+            </div>
+          )}
         </div>
 
         <div className="ml-auto flex items-center gap-2">
@@ -388,29 +501,34 @@ export default function AssistantDashboardVapi({
           >
             <option value="log">Call Log</option>
             <option value="hourly">Hourly Analysis</option>
+            <option value="billing">Billing</option>
           </select>
         </div>
       </div>
 
-      {/* KPIs */}
-      <div className="mb-2 text-gray-500 text-sm">
-        <span className="opacity-80 font-medium">Metrics</span> —{" "}
-        <span className="italic">For Selected Period</span>
-      </div>
-      <div className="grid sm:grid-cols-3 gap-4 mb-8">
-        <KpiCard title="Number of Calls" value={nf(totalCalls)} />
-        <KpiCard
-          title="Total Minutes"
-          value={nf(totalMinutes, {
-            maximumFractionDigits: totalMinutes < 100 ? 1 : 0,
-          })}
-          subtitle="Sum of duration in minutes"
-        />
-        <KpiCard
-          title="Average Call Length"
-          value={nf(avgMinutes, { maximumFractionDigits: 2 })}
-        />
-      </div>
+      {/* KPIs (hide when Billing view is active) */}
+      {view !== "billing" && (
+        <>
+          <div className="mb-2 text-gray-500 text-sm">
+            <span className="opacity-80 font-medium">Metrics</span> —{" "}
+            <span className="italic">For Selected Period</span>
+          </div>
+          <div className="grid sm:grid-cols-3 gap-4 mb-8">
+            <KpiCard title="Number of Calls" value={nf(totalCalls)} />
+            <KpiCard
+              title="Total Minutes"
+              value={nf(totalMinutes, {
+                maximumFractionDigits: totalMinutes < 100 ? 1 : 0,
+              })}
+              subtitle="Sum of duration in minutes"
+            />
+            <KpiCard
+              title="Average Call Length"
+              value={nf(avgMinutes, { maximumFractionDigits: 2 })}
+            />
+          </div>
+        </>
+      )}
 
       {/* Conditional Views */}
       {view === "hourly" ? (
@@ -423,9 +541,9 @@ export default function AssistantDashboardVapi({
           </div>
           <div style={{ width: "100%", height: 320 }}>
             <ResponsiveContainer>
-              <_LineChart data={hourlyData}>
+              <LineChart data={hourlyData}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="label" interval={1} />
+                <XAxis dataKey="label" />
                 <YAxis allowDecimals={false} />
                 <Tooltip />
                 <Line
@@ -435,9 +553,92 @@ export default function AssistantDashboardVapi({
                   strokeWidth={2}
                   dot={{ r: 2 }}
                 />
-              </_LineChart>
+              </LineChart>
             </ResponsiveContainer>
           </div>
+        </div>
+      ) : view === "billing" ? (
+        <div className="rounded-2xl shadow bg-white border border-gray-100 p-5 space-y-6">
+          <div>
+            <div className="font-medium text-lg">Billing</div>
+            <div className="text-sm text-gray-500">
+              Plan details and this month’s usage
+            </div>
+          </div>
+
+          {planLoading ? (
+            <div className="text-gray-500">Loading plan…</div>
+          ) : planError ? (
+            <div className="text-red-600">{planError}</div>
+          ) : (
+            <>
+              {/* List-style summary */}
+              <div className="rounded-xl border bg-gray-50 p-4 space-y-2 text-sm">
+                <div className="flex justify-between gap-4">
+                  <span className="text-gray-600">Current Month/Year</span>
+                  <span className="font-medium">{monthLabel}</span>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <span className="text-gray-600">Plan Name</span>
+                  <span className="font-medium">{planName}</span>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <span className="text-gray-600">Plan Monthly Fee</span>
+                  <span className="font-medium">{usd(planMonthlyFee)}</span>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <span className="text-gray-600">Plan Monthly Calls</span>
+                  <span className="font-medium">{nf(planMonthlyCalls)}</span>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <span className="text-gray-600">Actual Monthly Calls</span>
+                  <span className="font-medium">{nf(callsThisMonth)}</span>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <span className="text-gray-600">Call Balance</span>
+                  <span
+                    className={`font-medium ${
+                      callBalance < 0 ? "text-red-600" : "text-green-700"
+                    }`}
+                  >
+                    {nf(callBalance)}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <span className="text-gray-600">Call Overage Fee</span>
+                  <span className="font-medium">{usd(planOverageFee)}</span>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <span className="text-gray-600">Calculated Overage</span>
+                  <span className="font-semibold">
+                    {overageCount > 0 ? `${nf(overageCount)} calls` : "0 calls"}
+                    {" · "}
+                    {usd(overageAmount)}
+                  </span>
+                </div>
+                {planStartMonth && (
+                  <div className="flex justify-between gap-4">
+                    <span className="text-gray-600">Plan Start Month</span>
+                    <span className="font-medium">{planStartMonth}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Visual usage bar */}
+              <div className="space-y-2">
+                <div className="text-sm text-gray-600">
+                  Monthly usage ({nf(callsThisMonth)} / {nf(planMonthlyCalls)})
+                </div>
+                <ProgressBar
+                  pct={
+                    planMonthlyCalls > 0
+                      ? Math.min(100, (callsThisMonth / planMonthlyCalls) * 100)
+                      : 0
+                  }
+                />
+              </div>
+            </>
+          )}
         </div>
       ) : (
         <div className="rounded-2xl shadow bg-white border border-gray-100 overflow-hidden">
