@@ -588,9 +588,7 @@ export default function AssistantDashboardVapi({
       const pOver = override?.planOverageFee ?? planOverageFee;
 
       // Prefer Timestamp-resolved Date if provided; fallback to parsing legacy header label
-      const pStartDate =
-        override?.planStartDate ??
-        null; // if null, we try to parse the string below
+      const pStartDate = override?.planStartDate ?? null;
 
       const parsedStart =
         pStartDate ??
@@ -632,11 +630,8 @@ export default function AssistantDashboardVapi({
         });
       }
 
-      rows.sort((a, b) => {
-        const da = new Date(a.month);
-        const dbb = new Date(b.month);
-        return dbb.getTime() - da.getTime();
-      });
+      // ✅ Newest month first (current month at top)
+      rows.reverse();
 
       setInvoiceRows(rows);
     } catch (e) {
