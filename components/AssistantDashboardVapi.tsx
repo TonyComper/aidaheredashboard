@@ -203,6 +203,26 @@ function parsePlanStartMonth(input?: string | null): Date | null {
   return null;
 }
 
+// ----------------- Robust Firestore field resolver -----------------
+function normalizeKey(k: string) {
+  return k.toLowerCase().replace(/\s+/g, "");
+}
+function getField<T = unknown>(
+  obj: Record<string, unknown>,
+  candidates: string[],
+  fallback?: T
+): T | undefined {
+  const map = new Map<string, string>();
+  for (const k of Object.keys(obj)) {
+    map.set(normalizeKey(k), k);
+  }
+  for (const c of candidates) {
+    const found = map.get(normalizeKey(c));
+    if (found != null) return obj[found] as T;
+  }
+  return fallback;
+}
+
 function KpiCard({
   title,
   value,
@@ -395,39 +415,28 @@ export default function AssistantDashboardVapi({
       }
       const u = usersSnap.docs[0].data() as Record<string, unknown>;
 
-      // Support both labeled and camelCase fields
-      const _planName = String(u["Plan Name"] ?? u.planName ?? "—");
-      const _planMonthlyCalls =
-        typeof u["Plan Monthly Calls"] === "number"
-          ? (u["Plan Monthly Calls"] as number)
-          : typeof u.planMonthlyCalls === "number"
-          ? (u.planMonthlyCalls as number)
-          : 0;
-      const _planMonthlyFee =
-        typeof u["Plan Monthly Fee"] === "number"
-          ? (u["Plan Monthly Fee"] as number)
-          : typeof u.planMonthlyFee === "number"
-          ? (u.planMonthlyFee as number)
-          : 0;
-      const _planOverageFee =
-        typeof u["Plan Overage Fee"] === "number"
-          ? (u["Plan Overage Fee"] as number)
-          : typeof u.planOverageFee === "number"
-          ? (u.planOverageFee as number)
-          : 0;
-      const _planStartMonth =
-        typeof u["Plan Start Month"] === "string"
-          ? (u["Plan Start Month"] as string)
-          : typeof u.planStartMonth === "string"
-          ? (u.planStartMonth as string)
-          : null;
+      // Resolve fields robustly (handles labels, camelCase, or weird spacing/case)
+      const _planName = String(
+        (getField<string>(u, ["Plan Name", "planName"]) ?? "—")
+      );
+      const _planMonthlyCalls = Number(
+        getField<number>(u, ["Plan Monthly Calls", "planMonthlyCalls"], 0) ?? 0
+      );
+      const _planMonthlyFee = Number(
+        getField<number>(u, ["Plan Monthly Fee", "planMonthlyFee"], 0) ?? 0
+      );
+      const _planOverageFee = Number(
+        getField<number>(u, ["Plan Overage Fee", "planOverageFee"], 0) ?? 0
+      );
+      const _planStartMonthRaw =
+        getField<string>(u, ["Plan Start Month", "planStartMonth"]) ?? null;
 
-      // Update state (existing behavior)
+      // Update state
       setPlanName(_planName);
       setPlanMonthlyCalls(_planMonthlyCalls);
       setPlanMonthlyFee(_planMonthlyFee);
       setPlanOverageFee(_planOverageFee);
-      setPlanStartMonth(_planStartMonth);
+      setPlanStartMonth(_planStartMonthRaw);
 
       // Return fresh values to callers to avoid timing issues
       return {
@@ -435,7 +444,7 @@ export default function AssistantDashboardVapi({
         planMonthlyCalls: _planMonthlyCalls,
         planMonthlyFee: _planMonthlyFee,
         planOverageFee: _planOverageFee,
-        planStartMonth: _planStartMonth,
+        planStartMonth: _planStartMonthRaw,
       };
     } catch (e) {
       setPlanError(
@@ -524,7 +533,7 @@ export default function AssistantDashboardVapi({
     planOverageFee?: number;
     planStartMonth?: string | null;
   }) {
-    // ⬇️ Only block on planLoading if we DON'T have an override
+    // Only block on planLoading if we DON'T have an override
     if (!override && (planLoading || planError)) return;
 
     setInvoiceLoading(true);
@@ -593,7 +602,7 @@ export default function AssistantDashboardVapi({
     }
   }
 
-  // 🔁 Reload plan then invoice when switching to Invoice view (using fresh values)
+  // Reload plan then invoice when switching to Invoice view (using fresh values)
   useEffect(() => {
     if (view === "invoice") {
       (async () => {
