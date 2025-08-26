@@ -1,7 +1,7 @@
 // components/AssistantDashboardVapi.tsx
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   collection,
   getDocs,
@@ -113,6 +113,7 @@ function resolveRange(
     }
     case "last_3_months":
       return { start: startOfMonth(addMonths(now, -2)), end: endOfMonth(now) };
+    }
     case "this_year":
       return { start: startOfYear(now), end: endOfYear(now) };
     case "custom":
@@ -332,6 +333,17 @@ export default function AssistantDashboardVapi({
       }
     }
   }
+
+  // ✅ Auto-sync once on first mount (and whenever assistantId changes)
+  const didAutoSyncRef = useRef(false);
+  useEffect(() => {
+    if (!assistantId) return;
+    if (!didAutoSyncRef.current) {
+      didAutoSyncRef.current = true;
+      // Fire-and-forget; UI shows Syncing… indicator
+      void syncNow();
+    }
+  }, [assistantId]); // runs when dashboard mounts and when assistantId changes
 
   // -------- DATA (call logs) ----------
   async function loadData() {
