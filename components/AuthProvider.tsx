@@ -28,25 +28,28 @@ import {
 } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 
-/** Shape of the profile document in Firestore: `users/{uid or arbitrary}` */
+/** Shape of the profile document we expose to the app */
 export type Profile = {
+  uid?: string;
+  email: string;
   restaurantName: string;
   assistantId: string;
-  email: string;
-  uid?: string;
+
+  // Billing fields (all optional; normalized from Firestore)
+  planName?: string;            // from "Plan Name"
+  planStartMonth?: string;      // from "Plan Start Month"
+  planMonthlyCalls?: number;    // from "Plan Monthly Calls"
+  planMonthlyFee?: number;      // from "Plan Monthly Fee"
+  planOverageFee?: number;      // from "Plan Overage Fee"
 };
 
 type AuthCtx = {
   user: User | null;
   profile: Profile | null;
   loading: boolean;
-  /** Email/password sign-in */
   signIn: (email: string, password: string) => Promise<void>;
-  /** Email/password sign-up (optional; profile must already exist in Firestore for dashboard to work) */
   signUp: (email: string, password: string) => Promise<void>;
-  /** Send password reset email */
   resetPassword: (email: string) => Promise<void>;
-  /** Sign out */
   signOutApp: () => Promise<void>;
 };
 
@@ -56,6 +59,59 @@ export function useAuth(): AuthCtx {
   const v = useContext(Ctx);
   if (!v) throw new Error("AuthProvider missing in the React tree");
   return v;
+}
+
+/** Normalize arbitrary Firestore doc -> Profile */
+function mapDocToProfile(data: DocumentData, fallback: { email?: string; uid?: string }): Profile {
+  // Support both camelCase keys and spaced field names from your screenshot.
+  const getS = (k: string, alt?: string) =>
+    (data?.[k] ?? (alt ? data?.[alt] : undefined)) as unknown;
+  const getN = (k: string, alt?: string) => {
+    const v = getS(k, alt);
+    const n = typeof v === "number" ? v : Number(v);
+    return Number.isFinite(n) ? n : undefined;
+  };
+
+  const restaurantName =
+    (getS("restaurantName") as string) ??
+    (getS("name") as string) ??
+    "";
+
+  const assistantId =
+    (getS("assistantId") as string) ?? "";
+
+  const planName =
+    (getS("planName") as string) ??
+    (getS("Plan Name") as string) ??
+    undefined;
+
+  const planStartMonth =
+    (getS("planStartMonth") as string) ??
+    (getS("Plan Start Month") as string) ??
+    undefined;
+
+  const planMonthlyCalls =
+    getN("planMonthlyCalls", "Plan Monthly Calls");
+
+  const planMonthlyFee =
+    getN("planMonthlyFee", "Plan Monthly Fee");
+
+  const planOverageFee =
+    getN("planOverageFee", "Plan Overage Fee");
+
+  return {
+    uid: typeof data?.uid === "string" ? (data.uid as string) : fallback.uid,
+    email:
+      (getS("email") as string) ??
+      (fallback.email ?? ""),
+    restaurantName,
+    assistantId,
+    planName,
+    planStartMonth,
+    planMonthlyCalls,
+    planMonthlyFee,
+    planOverageFee,
+  };
 }
 
 export default function AuthProvider({ children }: PropsWithChildren) {
@@ -70,13 +126,13 @@ export default function AuthProvider({ children }: PropsWithChildren) {
         let p: Profile | null = null;
 
         try {
-          // Prefer a profile doc keyed by uid
+          // Prefer /users/{uid}
           const byUidRef = doc(db, "users", u.uid);
           const byUidSnap = await getDoc(byUidRef);
           if (byUidSnap.exists()) {
-            p = byUidSnap.data() as Profile;
+            p = mapDocToProfile(byUidSnap.data(), { email: u.email ?? undefined, uid: u.uid });
           } else if (u.email) {
-            // Fallback: profile doc keyed arbitrarily but contains "email" field
+            // Fallback: first doc with email == u.email
             const q = query(
               collection(db, "users"),
               where("email", "==", u.email),
@@ -84,18 +140,11 @@ export default function AuthProvider({ children }: PropsWithChildren) {
             );
             const qs = await getDocs(q);
             if (!qs.empty) {
-              const data = qs.docs[0].data() as DocumentData;
-              // Safely map unknown data to Profile shape
-              p = {
-                restaurantName: String(data.restaurantName ?? ""),
-                assistantId: String(data.assistantId ?? ""),
-                email: String(data.email ?? u.email),
-                uid: typeof data.uid === "string" ? data.uid : u.uid,
-              };
+              p = mapDocToProfile(qs.docs[0].data(), { email: u.email, uid: u.uid });
             }
           }
         } catch {
-          // Ignore profile fetch errors; UI can show a helpful message
+          // ignore; UI will handle missing profile
         }
 
         setProfile(p);
@@ -112,16 +161,17 @@ export default function AuthProvider({ children }: PropsWithChildren) {
     user,
     profile,
     loading,
-    signIn: async (email: string, password: string): Promise<void> => {
+    signIn: async (email: string, password: string) => {
       await signInWithEmailAndPassword(auth, email, password);
     },
-    signUp: async (email: string, password: string): Promise<void> => {
+    signUp: async (email: string, password: string) => {
+      // Optional: you can keep sign-up open; profile should be pre-provisioned in Firestore
       await createUserWithEmailAndPassword(auth, email, password);
     },
-    resetPassword: async (email: string): Promise<void> => {
+    resetPassword: async (email: string) => {
       await sendPasswordResetEmail(auth, email);
     },
-    signOutApp: async (): Promise<void> => {
+    signOutApp: async () => {
       await signOut(auth);
     },
   };
