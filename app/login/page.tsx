@@ -61,7 +61,7 @@ export default function LoginPage() {
           <img
             src="/logo1.png"
             alt="AVAI Logo"
-            className="h-40 w-auto"
+            className="h-56 w-auto"
           />
         </div>
 
