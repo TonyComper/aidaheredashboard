@@ -89,7 +89,7 @@ export default function LoginPage() {
       <div className="w-full max-w-md bg-white p-6 rounded-2xl shadow">
         {/* Logo */}
         <div className="flex flex-col items-center mb-6">
-          <img src="/logo1.png" alt="AVAI Logo" className="h-32 w-auto" />
+          <img src="/logo1.png" alt="AVAI Logo" className="h-48 w-auto" />
         </div>
 
         {/* Heading */}
