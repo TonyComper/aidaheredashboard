@@ -113,7 +113,6 @@ function resolveRange(
     }
     case "last_3_months":
       return { start: startOfMonth(addMonths(now, -2)), end: endOfMonth(now) };
-    }
     case "this_year":
       return { start: startOfYear(now), end: endOfYear(now) };
     case "custom":
