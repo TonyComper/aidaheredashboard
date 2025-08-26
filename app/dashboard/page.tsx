@@ -35,7 +35,7 @@ export default function DashboardPage() {
           </button>
         </div>
 
-        {/* Assistant Dashboard */}
+        {/* Assistant Dashboard handles plan info itself */}
         <AssistantDashboard assistantId={profile.assistantId} />
       </div>
     </div>
