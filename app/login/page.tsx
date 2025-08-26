@@ -6,7 +6,7 @@ import Image from "next/image";
 import { useAuth } from "@/components/AuthProvider";
 
 export default function LoginPage() {
-  const { signInApp } = useAuth();
+  const { signInApp } = useAuth(); // assumes your AuthProvider exposes this
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -18,7 +18,10 @@ export default function LoginPage() {
     setLoading(true);
     try {
       await signInApp(email, password);
-    } catch (err) {
+      // If your AuthProvider redirects on success, nothing else to do here.
+      // Otherwise, you can programmatically route to /dashboard.
+      // router.push("/dashboard");
+    } catch {
       setError("Invalid credentials. Please try again.");
     } finally {
       setLoading(false);
@@ -31,7 +34,7 @@ export default function LoginPage() {
         {/* Logo */}
         <div className="flex flex-col items-center mb-6">
           <Image
-            src="/logo1.png"   // 👈 file in /public/logo1.png
+            src="/logo1.png"  // file located at /public/logo1.png
             alt="AVAI Logo"
             width={120}
             height={120}
@@ -50,11 +53,12 @@ export default function LoginPage() {
             </label>
             <input
               type="email"
+              placeholder="owner@restaurant.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="w-full border rounded-xl p-3 mt-1"
-              placeholder="owner@restaurant.com"
               required
+              autoComplete="email"
             />
           </div>
           <div>
@@ -63,10 +67,12 @@ export default function LoginPage() {
             </label>
             <input
               type="password"
+              placeholder="••••••••"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="w-full border rounded-xl p-3 mt-1"
               required
+              autoComplete="current-password"
             />
           </div>
 
@@ -75,13 +81,13 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-3 rounded-xl bg-black text-white font-semibold hover:bg-gray-800"
+            className="w-full py-3 rounded-xl bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-70"
           >
             {loading ? "Signing in…" : "Log in"}
           </button>
         </form>
 
-        {/* Footer links */}
+        {/* Optional links */}
         <div className="mt-4 flex justify-between text-sm">
           <a href="#" className="text-blue-600 hover:underline">
             Forgot password?
