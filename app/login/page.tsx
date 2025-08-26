@@ -2,19 +2,11 @@
 "use client";
 
 import React, { useState } from "react";
-import { useRouter } from "next/navigation";
+import Image from "next/image";
 import { useAuth } from "@/components/AuthProvider";
 
-// Fallback to Firebase Auth if your context doesn't expose a sign-in method
-import { getAuth, signInWithEmailAndPassword } from "firebase/auth";
-import { app as firebaseApp } from "@/lib/firebase";
-
 export default function LoginPage() {
-  const router = useRouter();
-
-  // Use a flexible shim so we don't depend on the exact AuthCtx typing
-  const authCtx = useAuth() as any;
-
+  const { signInApp } = useAuth(); // keep your existing auth API
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -24,29 +16,13 @@ export default function LoginPage() {
     e.preventDefault();
     setError(null);
     setLoading(true);
-
     try {
-      // Try common method names your AuthProvider might expose:
-      if (typeof authCtx?.signInApp === "function") {
-        await authCtx.signInApp(email, password);
-      } else if (typeof authCtx?.login === "function") {
-        await authCtx.login(email, password);
-      } else if (typeof authCtx?.signIn === "function") {
-        await authCtx.signIn(email, password);
-      } else {
-        // Fallback: use Firebase Auth directly
-        const auth = getAuth(firebaseApp);
-        await signInWithEmailAndPassword(auth, email, password);
-      }
-
-      // If your provider auto-redirects, this is harmless; otherwise it helps.
-      router.push("/dashboard");
-    } catch (err: any) {
-      const msg =
-        err?.code === "auth/invalid-credential"
-          ? "Invalid email or password."
-          : "Sign-in failed. Please try again.";
-      setError(msg);
+      await signInApp(email, password);
+      // If your provider auto-redirects, nothing else needed.
+      // Otherwise you could route to /dashboard here.
+      // router.push("/dashboard");
+    } catch {
+      setError("Invalid credentials. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -55,30 +31,54 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen flex flex-col justify-center items-center bg-gray-50">
       <div className="w-full max-w-md bg-white p-6 rounded-2xl shadow">
+        {/* Logo */}
+        <div className="flex flex-col items-center mb-6">
+          <Image
+            src="/logo1.png"   // served from /public/logo1.png
+            alt="AVAI Logo"
+            width={120}
+            height={120}
+            priority
+          />
+        </div>
+
         {/* Heading */}
         <h1 className="text-2xl font-bold text-center mb-4">Log in</h1>
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="space-y-4">
-          <input
-            type="email"
-            placeholder="Email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="w-full border rounded-xl p-3"
-            required
-            autoComplete="email"
-          />
-          <input
-            type="password"
-            placeholder="Password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="w-full border rounded-xl p-3"
-            required
-            autoComplete="current-password"
-          />
+          <div>
+            <label className="block text-sm font-medium text-gray-700">
+              Email Address
+            </label>
+            <input
+              type="email"
+              placeholder="owner@restaurant.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full border rounded-xl p-3 mt-1"
+              required
+              autoComplete="email"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700">
+              Password
+            </label>
+            <input
+              type="password"
+              placeholder="••••••••"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full border rounded-xl p-3 mt-1"
+              required
+              autoComplete="current-password"
+            />
+          </div>
+
           {error && <p className="text-red-600 text-sm">{error}</p>}
+
           <button
             type="submit"
             disabled={loading}
