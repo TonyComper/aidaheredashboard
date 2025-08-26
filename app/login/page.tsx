@@ -6,7 +6,7 @@ import Image from "next/image";
 import { useAuth } from "@/components/AuthProvider";
 
 export default function LoginPage() {
-  const { signInApp } = useAuth(); // assumes your AuthProvider exposes this
+  const { signInApp } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -18,9 +18,6 @@ export default function LoginPage() {
     setLoading(true);
     try {
       await signInApp(email, password);
-      // If your AuthProvider redirects on success, nothing else to do here.
-      // Otherwise, you can programmatically route to /dashboard.
-      // router.push("/dashboard");
     } catch {
       setError("Invalid credentials. Please try again.");
     } finally {
@@ -33,24 +30,14 @@ export default function LoginPage() {
       <div className="w-full max-w-md bg-white p-6 rounded-2xl shadow">
         {/* Logo */}
         <div className="flex flex-col items-center mb-6">
-          <Image
-            src="/logo1.png"  // file located at /public/logo1.png
-            alt="AVAI Logo"
-            width={120}
-            height={120}
-            priority
-          />
+          <Image src="/logo1.png" alt="AVAI Logo" width={120} height={120} priority />
         </div>
 
-        {/* Heading */}
         <h1 className="text-2xl font-bold text-center mb-4">Log in</h1>
 
-        {/* Form */}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700">
-              Email Address
-            </label>
+            <label className="block text-sm font-medium text-gray-700">Email Address</label>
             <input
               type="email"
               placeholder="owner@restaurant.com"
@@ -62,9 +49,7 @@ export default function LoginPage() {
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700">
-              Password
-            </label>
+            <label className="block text-sm font-medium text-gray-700">Password</label>
             <input
               type="password"
               placeholder="••••••••"
@@ -81,21 +66,11 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-3 rounded-xl bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-70"
+            className="w-full py-3 rounded-xl bg-black text-white font-semibold hover:bg-gray-800 disabled:opacity-70"
           >
             {loading ? "Signing in…" : "Log in"}
           </button>
         </form>
-
-        {/* Optional links */}
-        <div className="mt-4 flex justify-between text-sm">
-          <a href="#" className="text-blue-600 hover:underline">
-            Forgot password?
-          </a>
-          <a href="#" className="text-blue-600 hover:underline">
-            Create one
-          </a>
-        </div>
       </div>
     </div>
   );
