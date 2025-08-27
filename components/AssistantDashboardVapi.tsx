@@ -284,6 +284,7 @@ export default function AssistantDashboardVapi({
   const [planStartMonth, setPlanStartMonth] = useState<string | null>(null); // for header display
   const [planOverageFee, setPlanOverageFee] = useState<number>(0);
   const [callsThisMonth, setCallsThisMonth] = useState<number>(0);
+  const [restaurantName, setRestaurantName] = useState<string | null>(null); // ✅ NEW
 
   // INVOICE HISTORY
   type InvoiceRow = {
@@ -441,6 +442,12 @@ export default function AssistantDashboardVapi({
           : typeof u.planOverageFee === "number"
           ? (u.planOverageFee as number)
           : 0;
+
+      // ✅ Restaurant name (either label or camelCase)
+      const _restaurantName = String(
+        u["Restaurant Name"] ?? u.restaurantName ?? ""
+      );
+      setRestaurantName(_restaurantName || null);
 
       // --- Plan Start Month: prefer Timestamp/epoch, fallback to string ---
       // Accept: "Plan Start Month" (Timestamp or string), planStartMonthTs (Timestamp),
@@ -674,6 +681,9 @@ export default function AssistantDashboardVapi({
           <div className="text-sm text-red-600">{planError}</div>
         ) : (
           <div className="space-y-1 text-base">
+            {restaurantName && (
+              <div className="text-lg font-semibold">{restaurantName}</div>
+            )}
             <div>
               <span className="font-medium">Plan Type</span> — {planName || "—"}
             </div>
