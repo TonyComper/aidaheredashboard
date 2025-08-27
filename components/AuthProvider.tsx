@@ -7,7 +7,7 @@ import React, {
   useEffect,
   useMemo,
   useState,
-  PropsWithChildren,
+  type PropsWithChildren,
 } from "react";
 import { auth, db } from "@/lib/firebase";
 import {
@@ -40,7 +40,7 @@ type Profile = {
 type AuthContextShape = {
   user: FirebaseUser | null;
   profile: Profile | null;
-  loading: boolean;         // ✅ stays true until profile is fetched (or confirmed absent)
+  loading: boolean;
   error: string | null;
   signIn: (email: string, password: string) => Promise<void>;
   signOutUser: () => Promise<void>;
@@ -50,7 +50,7 @@ type AuthContextShape = {
 const AuthCtx = createContext<AuthContextShape | undefined>(undefined);
 
 async function fetchProfileByUidOrEmail(user: FirebaseUser): Promise<Profile | null> {
-  // 1) Try users/{uid} from SERVER to avoid empty cache on first login
+  // Try users/{uid} from SERVER to avoid empty cache on first login
   const uidRef = doc(db, "users", user.uid);
   try {
     const serverSnap = await getDocFromServer(uidRef);
@@ -58,22 +58,18 @@ async function fetchProfileByUidOrEmail(user: FirebaseUser): Promise<Profile | n
       return { id: serverSnap.id, ...(serverSnap.data() as DocumentData) };
     }
   } catch {
-    // ignore network/cached errors and fall back to getDoc
+    // ignore and fall back to getDoc
   }
 
-  // 2) Fallback to normal getDoc (cache or server)
+  // Fallback to normal getDoc
   const snap = await getDoc(uidRef);
   if (snap.exists()) {
     return { id: snap.id, ...(snap.data() as DocumentData) };
   }
 
-  // 3) Fallback: search by email (supports arbitrary doc IDs)
+  // Fallback: search by email (supports arbitrary doc IDs)
   if (user.email) {
-    const qy = query(
-      collection(db, "users"),
-      where("email", "==", user.email),
-      limit(1)
-    );
+    const qy = query(collection(db, "users"), where("email", "==", user.email), limit(1));
     const res = await getDocs(qy);
     if (!res.empty) {
       const d = res.docs[0];
@@ -81,14 +77,13 @@ async function fetchProfileByUidOrEmail(user: FirebaseUser): Promise<Profile | n
     }
   }
 
-  // Not found yet
   return null;
 }
 
-export function AuthProvider({ children }: PropsWithChildren) {
+function AuthProviderImpl({ children }: PropsWithChildren) {
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
-  const [loading, setLoading] = useState(true);  // ✅ key change: true until profile resolved
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -105,7 +100,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       try {
         setLoading(true);
         const p = await fetchProfileByUidOrEmail(u);
-        setProfile(p); // can be null (we’ll handle downstream)
+        setProfile(p);
       } catch (e) {
         setError(e instanceof Error ? e.message : "Failed to load profile");
         setProfile(null);
@@ -117,25 +112,34 @@ export function AuthProvider({ children }: PropsWithChildren) {
     return () => unsub();
   }, []);
 
-  const value = useMemo<AuthContextShape>(() => ({
-    user,
-    profile,
-    loading,
-    error,
-    async signIn(email: string, password: string) {
-      await signInWithEmailAndPassword(auth, email, password);
-    },
-    async signOutUser() {
-      await signOut(auth);
-    },
-    async resetPassword(email: string) {
-      await sendPasswordResetEmail(auth, email);
-    },
-  }), [user, profile, loading, error]);
+  const value = useMemo<AuthContextShape>(
+    () => ({
+      user,
+      profile,
+      loading,
+      error,
+      async signIn(email: string, password: string) {
+        await signInWithEmailAndPassword(auth, email, password);
+      },
+      async signOutUser() {
+        await signOut(auth);
+      },
+      async resetPassword(email: string) {
+        await sendPasswordResetEmail(auth, email);
+      },
+    }),
+    [user, profile, loading, error]
+  );
 
   return <AuthCtx.Provider value={value}>{children}</AuthCtx.Provider>;
 }
 
+// ✅ Default export to match your import in app/providers.tsx
+export default function AuthProvider(props: PropsWithChildren) {
+  return <AuthProviderImpl {...props} />;
+}
+
+// Hook remains a named export
 export function useAuth() {
   const ctx = useContext(AuthCtx);
   if (!ctx) throw new Error("useAuth must be used within AuthProvider");
