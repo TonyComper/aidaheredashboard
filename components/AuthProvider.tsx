@@ -123,7 +123,10 @@ function AuthProviderImpl({ children }: PropsWithChildren) {
       },
       async signOutUser() {
         await signOut(auth);
-      },
+        if (typeof window !== "undefined") {
+          window.location.href = "/login"; // ✅ Redirect to login after sign out
+        }
+      }, // ← missing comma fixed here
       async resetPassword(email: string) {
         await sendPasswordResetEmail(auth, email);
       },
@@ -133,12 +136,10 @@ function AuthProviderImpl({ children }: PropsWithChildren) {
 
   return <AuthCtx.Provider value={value}>{children}</AuthCtx.Provider>;
 }
-
 // ✅ Default export to match your import in app/providers.tsx
 export default function AuthProvider(props: PropsWithChildren) {
   return <AuthProviderImpl {...props} />;
 }
-
 // Hook remains a named export
 export function useAuth() {
   const ctx = useContext(AuthCtx);
