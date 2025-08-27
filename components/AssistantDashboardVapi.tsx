@@ -1,4 +1,3 @@
-// components/AssistantDashboardVapi.tsx
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
@@ -14,7 +13,6 @@ import {
 } from "firebase/firestore";
 import { app as firebaseApp } from "@/lib/firebase";
 import dynamic from "next/dynamic";
-import { useAuth } from "@/components/AuthProvider"; // ← added
 
 // Recharts (client-only)
 const ResponsiveContainer = dynamic(
@@ -257,8 +255,6 @@ export default function AssistantDashboardVapi({
   assistantId: string;
   pageSize?: number;
 }) {
-  const { profile, signOutUser } = useAuth(); // ← added
-
   // Period + custom range
   const [preset, setPreset] = useState<PresetKey>("today");
   const [customStart, setCustomStart] = useState<string>("");
@@ -403,7 +399,7 @@ export default function AssistantDashboardVapi({
     planMonthlyFee: number;
     planOverageFee: number;
     planStartMonth: string | null; // label for header
-    planStartDate: Date | null;    // normalized first-of-month Date for logic
+    planStartDate: Date | null; // normalized first-of-month Date for logic
   } | null> {
     setPlanLoading(true);
     setPlanError(null);
@@ -475,7 +471,11 @@ export default function AssistantDashboardVapi({
         _planStartDate = new Date(
           _planStartDate.getFullYear(),
           _planStartDate.getMonth(),
-          1, 0, 0, 0, 0
+          1,
+          0,
+          0,
+          0,
+          0
         );
         _planStartMonthLabel = _planStartDate.toLocaleString(undefined, {
           month: "long",
@@ -585,7 +585,7 @@ export default function AssistantDashboardVapi({
     planMonthlyFee?: number;
     planOverageFee?: number;
     planStartMonth?: string | null; // unused for logic, display only
-    planStartDate?: Date | null;    // preferred source for logic
+    planStartDate?: Date | null; // preferred source for logic
   }) {
     // Only block on planLoading if we DON'T have an override
     if (!override && (planLoading || planError)) return;
@@ -606,7 +606,9 @@ export default function AssistantDashboardVapi({
 
       const parsedStart =
         pStartDate ??
-        parsePlanStartMonth(override?.planStartMonth ?? planStartMonth ?? undefined);
+        parsePlanStartMonth(
+          override?.planStartMonth ?? planStartMonth ?? undefined
+        );
 
       const startFromPlan = parsedStart ?? startOfMonth(now);
       const months = monthRangeInclusive(startFromPlan, now);
@@ -669,25 +671,8 @@ export default function AssistantDashboardVapi({
 
   return (
     <div>
-  {/* Plan header (shows on every view) */}
-    <div className="rounded-xl bg-white border border-gray-200 p-4 mb-5">
-    {planLoading ? (
-    <div className="text-sm text-gray-500">Loading plan…</div>
-  ) : planError ? (
-    <div className="text-sm text-red-600">{planError}</div>
-  ) : (
-    <div className="space-y-1 text-base">
-      <div>
-        <span className="font-medium">Plan Type</span> — {planName || "—"}
-      </div>
-      <div>
-        <span className="font-medium">Plan Start Month</span> —{" "}
-        {planStartMonth || "—"}
-      </div>
-    </div>
-     )}
-    </div>
-        {/* existing content below unchanged */}
+      {/* Plan info header (NO restaurant name or sign out here anymore) */}
+      <div className="rounded-xl bg-white border border-gray-200 p-4 mb-5">
         {planLoading ? (
           <div className="text-sm text-gray-500">Loading plan…</div>
         ) : planError ? (
