@@ -14,7 +14,6 @@ import {
 } from "firebase/firestore";
 import { app as firebaseApp } from "@/lib/firebase";
 import dynamic from "next/dynamic";
-import { useAuth } from "@/components/AuthProvider"; // ✅ for sign out
 
 // Recharts (client-only)
 const ResponsiveContainer = dynamic(
@@ -257,8 +256,6 @@ export default function AssistantDashboardVapi({
   assistantId: string;
   pageSize?: number;
 }) {
-  const { signOutUser } = useAuth(); // ✅ get sign-out
-
   // Period + custom range
   const [preset, setPreset] = useState<PresetKey>("today");
   const [customStart, setCustomStart] = useState<string>("");
@@ -287,7 +284,6 @@ export default function AssistantDashboardVapi({
   const [planStartMonth, setPlanStartMonth] = useState<string | null>(null); // for header display
   const [planOverageFee, setPlanOverageFee] = useState<number>(0);
   const [callsThisMonth, setCallsThisMonth] = useState<number>(0);
-  const [restaurantName, setRestaurantName] = useState<string | null>(null);
 
   // INVOICE HISTORY
   type InvoiceRow = {
@@ -337,15 +333,16 @@ export default function AssistantDashboardVapi({
     }
   }
 
-  // ✅ Auto-sync once
+  // ✅ Auto-sync once on first mount (and whenever assistantId changes)
   const didAutoSyncRef = useRef(false);
   useEffect(() => {
     if (!assistantId) return;
     if (!didAutoSyncRef.current) {
       didAutoSyncRef.current = true;
+      // Fire-and-forget; UI shows Syncing… indicator
       void syncNow();
     }
-  }, [assistantId]);
+  }, [assistantId]); // runs when dashboard mounts and when assistantId changes
 
   // -------- DATA (call logs) ----------
   async function loadData() {
@@ -402,8 +399,8 @@ export default function AssistantDashboardVapi({
     planMonthlyCalls: number;
     planMonthlyFee: number;
     planOverageFee: number;
-    planStartMonth: string | null;
-    planStartDate: Date | null;
+    planStartMonth: string | null; // label for header
+    planStartDate: Date | null;    // normalized first-of-month Date for logic
   } | null> {
     setPlanLoading(true);
     setPlanError(null);
@@ -424,6 +421,7 @@ export default function AssistantDashboardVapi({
       }
       const u = usersSnap.docs[0].data() as Record<string, any>;
 
+      // Support both labeled and camelCase fields
       const _planName = String(u["Plan Name"] ?? u.planName ?? "—");
       const _planMonthlyCalls =
         typeof u["Plan Monthly Calls"] === "number"
@@ -444,11 +442,9 @@ export default function AssistantDashboardVapi({
           ? (u.planOverageFee as number)
           : 0;
 
-      const _restaurantName = String(
-        u["Restaurant Name"] ?? u.restaurantName ?? ""
-      );
-      setRestaurantName(_restaurantName || null);
-
+      // --- Plan Start Month: prefer Timestamp/epoch, fallback to string ---
+      // Accept: "Plan Start Month" (Timestamp or string), planStartMonthTs (Timestamp),
+      //         planStartMonthMs (number epoch), planStartMonth (string)
       const rawStart =
         u["Plan Start Month"] ??
         u.planStartMonthTs ??
@@ -459,15 +455,19 @@ export default function AssistantDashboardVapi({
       let _planStartMonthLabel: string | null = null;
 
       if (rawStart && typeof rawStart?.toDate === "function") {
+        // Firestore Timestamp
         _planStartDate = rawStart.toDate();
       } else if (typeof rawStart === "number" && isFinite(rawStart)) {
+        // epoch ms
         _planStartDate = new Date(rawStart);
       } else if (typeof rawStart === "string") {
+        // legacy string
         const parsed = parsePlanStartMonth(rawStart);
         if (parsed) _planStartDate = parsed;
-        else _planStartMonthLabel = rawStart;
+        else _planStartMonthLabel = rawStart; // at least show in header
       }
 
+      // Normalize to first day of month (local)
       if (_planStartDate) {
         _planStartDate = new Date(
           _planStartDate.getFullYear(),
@@ -480,12 +480,14 @@ export default function AssistantDashboardVapi({
         });
       }
 
+      // Update header state
       setPlanName(_planName);
       setPlanMonthlyCalls(_planMonthlyCalls);
       setPlanMonthlyFee(_planMonthlyFee);
       setPlanOverageFee(_planOverageFee);
       setPlanStartMonth(_planStartMonthLabel);
 
+      // Return fresh values to callers (used by invoice loader)
       return {
         planName: _planName,
         planMonthlyCalls: _planMonthlyCalls,
@@ -531,7 +533,7 @@ export default function AssistantDashboardVapi({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [assistantId]);
 
-  // KPI totals
+  // KPI totals for log/hourly
   const totalCalls = rows.length;
   const totalMinutes = useMemo(
     () =>
@@ -543,7 +545,7 @@ export default function AssistantDashboardVapi({
   );
   const avgMinutes = totalCalls ? totalMinutes / totalCalls : 0;
 
-  // Hourly Analysis dataset
+  // Hourly Analysis dataset (midnight → 11 PM)
   const hourlyData = useMemo(() => {
     const buckets = Array.from({ length: 24 }, (_, h) => ({
       hour: h,
@@ -560,7 +562,7 @@ export default function AssistantDashboardVapi({
     return buckets;
   }, [rows]);
 
-  // Billing computed labels
+  // Billing computations
   const monthLabel = useMemo(
     () =>
       new Date().toLocaleString(undefined, {
@@ -569,6 +571,9 @@ export default function AssistantDashboardVapi({
       }),
     []
   );
+  const callBalance = planMonthlyCalls - callsThisMonth; // positive => remaining
+  const overageCount = Math.max(0, -callBalance); // how many calls above plan
+  const overageAmount = overageCount * planOverageFee;
 
   // -------- Invoice History Loader --------
   async function loadInvoiceHistory(override?: {
@@ -576,9 +581,10 @@ export default function AssistantDashboardVapi({
     planMonthlyCalls?: number;
     planMonthlyFee?: number;
     planOverageFee?: number;
-    planStartMonth?: string | null;
-    planStartDate?: Date | null;
+    planStartMonth?: string | null; // unused for logic, display only
+    planStartDate?: Date | null;    // preferred source for logic
   }) {
+    // Only block on planLoading if we DON'T have an override
     if (!override && (planLoading || planError)) return;
 
     setInvoiceLoading(true);
@@ -592,6 +598,7 @@ export default function AssistantDashboardVapi({
       const pFee = override?.planMonthlyFee ?? planMonthlyFee;
       const pOver = override?.planOverageFee ?? planOverageFee;
 
+      // Prefer Timestamp-resolved Date if provided; fallback to parsing legacy header label
       const pStartDate = override?.planStartDate ?? null;
 
       const parsedStart =
@@ -634,7 +641,9 @@ export default function AssistantDashboardVapi({
         });
       }
 
+      // ✅ Newest month first (current month at top)
       rows.reverse();
+
       setInvoiceRows(rows);
     } catch (e) {
       setInvoiceError(
@@ -645,7 +654,7 @@ export default function AssistantDashboardVapi({
     }
   }
 
-  // Reload plan then invoice when switching to Invoice view
+  // Reload plan then invoice when switching to Invoice view (using fresh values)
   useEffect(() => {
     if (view === "invoice") {
       (async () => {
@@ -657,39 +666,23 @@ export default function AssistantDashboardVapi({
 
   return (
     <div>
-      {/* Plan header + Sign out */}
+      {/* Plan header (shows on every view) */}
       <div className="rounded-xl bg-white border border-gray-200 p-4 mb-5">
-        <div className="flex items-start gap-4">
-          <div className="flex-1">
-            {planLoading ? (
-              <div className="text-sm text-gray-500">Loading plan…</div>
-            ) : planError ? (
-              <div className="text-sm text-red-600">{planError}</div>
-            ) : (
-              <div className="space-y-1 text-base">
-                {restaurantName && (
-                  <div className="text-lg font-semibold">{restaurantName}</div>
-                )}
-                <div>
-                  <span className="font-medium">Plan Type</span> — {planName || "—"}
-                </div>
-                <div>
-                  <span className="font-medium">Plan Start Month</span> —{" "}
-                  {planStartMonth || "—"}
-                </div>
-              </div>
-            )}
+        {planLoading ? (
+          <div className="text-sm text-gray-500">Loading plan…</div>
+        ) : planError ? (
+          <div className="text-sm text-red-600">{planError}</div>
+        ) : (
+          <div className="space-y-1 text-base">
+            <div>
+              <span className="font-medium">Plan Type</span> — {planName || "—"}
+            </div>
+            <div>
+              <span className="font-medium">Plan Start Month</span> —{" "}
+              {planStartMonth || "—"}
+            </div>
           </div>
-
-          {/* ✅ Sign out button */}
-          <button
-            onClick={() => signOutUser()}
-            className="px-3 py-2 rounded-xl border bg-white hover:bg-gray-50 text-sm"
-            aria-label="Sign out"
-          >
-            Sign out
-          </button>
-        </div>
+        )}
       </div>
 
       {/* Filters Row */}
@@ -728,6 +721,38 @@ export default function AssistantDashboardVapi({
             onChange={(e) => setCustomEnd(e.target.value)}
             disabled={preset !== "custom"}
           />
+        </div>
+      </div>
+
+      {/* Actions Row */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 mb-5">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={syncNow}
+            className="px-3 py-2 rounded-xl border bg-white hover:bg-gray-50"
+            disabled={syncing}
+          >
+            {syncing ? "Syncing…" : "Sync now"}
+          </button>
+          {syncing && (
+            <div className="text-sm text-blue-600">
+              SYNC in PROGRESS. Please wait…
+            </div>
+          )}
+        </div>
+
+        <div className="ml-auto flex items-center gap-2">
+          <span className="text-sm text-gray-600">View</span>
+          <select
+            className="border rounded-xl p-2"
+            value={view}
+            onChange={(e) => setView(e.target.value as ViewMode)}
+          >
+            <option value="log">Call Log</option>
+            <option value="hourly">Hourly Analysis</option>
+            <option value="billing">Billing</option>
+            <option value="invoice">Invoice History</option>
+          </select>
         </div>
       </div>
 
