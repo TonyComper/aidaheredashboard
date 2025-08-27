@@ -669,20 +669,24 @@ export default function AssistantDashboardVapi({
 
   return (
     <div>
-      {/* Plan header (shows on every view) */}
-      <div className="rounded-xl bg-white border border-gray-200 p-4 mb-5">
-        {/* ← added row */}
-        <div className="flex items-center justify-between mb-2">
-          <div className="text-base font-semibold">
-            {profile?.restaurantName || profile?.name || "—"}
-          </div>
-          <button
-            onClick={signOutUser}
-            className="px-3 py-1.5 rounded-xl border bg-white hover:bg-gray-50"
-          >
-            Sign out
-          </button>
-        </div>
+  {/* Plan header (shows on every view) */}
+    <div className="rounded-xl bg-white border border-gray-200 p-4 mb-5">
+    {planLoading ? (
+    <div className="text-sm text-gray-500">Loading plan…</div>
+  ) : planError ? (
+    <div className="text-sm text-red-600">{planError}</div>
+  ) : (
+    <div className="space-y-1 text-base">
+      <div>
+        <span className="font-medium">Plan Type</span> — {planName || "—"}
+      </div>
+      <div>
+        <span className="font-medium">Plan Start Month</span> —{" "}
+        {planStartMonth || "—"}
+      </div>
+    </div>
+     )}
+    </div>
         {/* existing content below unchanged */}
         {planLoading ? (
           <div className="text-sm text-gray-500">Loading plan…</div>
