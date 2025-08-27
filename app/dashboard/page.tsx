@@ -6,7 +6,7 @@ import { useAuth } from "@/components/AuthProvider";
 import AssistantDashboardVapi from "@/components/AssistantDashboardVapi";
 
 export default function DashboardPage() {
-  const { loading, profile, error } = useAuth();
+  const { loading, profile, error, signOutUser } = useAuth();
 
   if (loading) {
     return (
@@ -37,13 +37,27 @@ export default function DashboardPage() {
     // ✅ Avoid throwing on first paint; show a friendly message instead
     return (
       <div className="p-6 text-sm text-gray-700">
-        No assistant configured for your account yet. If this is a new account, try again in a moment or refresh.
+        No assistant configured for your account yet. If this is a new account,
+        try again in a moment or refresh.
       </div>
     );
   }
 
   return (
     <div className="p-0">
+      {/* Header with restaurant name + sign out */}
+      <div className="flex items-center justify-between p-6 border-b bg-white">
+        <div className="text-2xl font-bold">
+          {profile.restaurantName || profile.name || "—"}
+        </div>
+        <button
+          onClick={signOutUser}
+          className="text-sm px-4 py-2 rounded-lg border bg-gray-50 hover:bg-gray-100"
+        >
+          Sign Out
+        </button>
+      </div>
+
       <AssistantDashboardVapi assistantId={profile.assistantId} />
     </div>
   );
