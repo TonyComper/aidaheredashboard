@@ -186,8 +186,18 @@ function parsePlanStartMonth(input?: string | null): Date | null {
   const m1 = cleaned.match(/^([A-Za-z]+)\s+(\d{4})$/);
   if (m1) {
     const months = [
-      "january","february","march","april","may","june",
-      "july","august","september","october","november","december"
+      "january",
+      "february",
+      "march",
+      "april",
+      "may",
+      "june",
+      "july",
+      "august",
+      "september",
+      "october",
+      "november",
+      "december",
     ];
     const idx = months.indexOf(m1[1].toLowerCase());
     const year = parseInt(m1[2], 10);
@@ -212,7 +222,15 @@ function parsePlanStartMonth(input?: string | null): Date | null {
 
   const fallback = new Date(cleaned);
   if (!isNaN(fallback.getTime()))
-    return new Date(fallback.getFullYear(), fallback.getMonth(), 1, 0, 0, 0, 0);
+    return new Date(
+      fallback.getFullYear(),
+      fallback.getMonth(),
+      1,
+      0,
+      0,
+      0,
+      0
+    );
 
   return null;
 }
@@ -284,7 +302,6 @@ export default function AssistantDashboardVapi({
   const [planStartMonth, setPlanStartMonth] = useState<string | null>(null); // for header display
   const [planOverageFee, setPlanOverageFee] = useState<number>(0);
   const [callsThisMonth, setCallsThisMonth] = useState<number>(0);
-  const [restaurantName, setRestaurantName] = useState<string | null>(null); // ✅ NEW
 
   // INVOICE HISTORY
   type InvoiceRow = {
@@ -340,10 +357,9 @@ export default function AssistantDashboardVapi({
     if (!assistantId) return;
     if (!didAutoSyncRef.current) {
       didAutoSyncRef.current = true;
-      // Fire-and-forget; UI shows Syncing… indicator
       void syncNow();
     }
-  }, [assistantId]); // runs when dashboard mounts and when assistantId changes
+  }, [assistantId]);
 
   // -------- DATA (call logs) ----------
   async function loadData() {
@@ -401,7 +417,7 @@ export default function AssistantDashboardVapi({
     planMonthlyFee: number;
     planOverageFee: number;
     planStartMonth: string | null; // label for header
-    planStartDate: Date | null;    // normalized first-of-month Date for logic
+    planStartDate: Date | null; // normalized first-of-month Date for logic
   } | null> {
     setPlanLoading(true);
     setPlanError(null);
@@ -443,12 +459,6 @@ export default function AssistantDashboardVapi({
           ? (u.planOverageFee as number)
           : 0;
 
-      // ✅ Restaurant name (either label or camelCase)
-      const _restaurantName = String(
-        u["Restaurant Name"] ?? u.restaurantName ?? ""
-      );
-      setRestaurantName(_restaurantName || null);
-
       // --- Plan Start Month: prefer Timestamp/epoch, fallback to string ---
       // Accept: "Plan Start Month" (Timestamp or string), planStartMonthTs (Timestamp),
       //         planStartMonthMs (number epoch), planStartMonth (string)
@@ -461,9 +471,9 @@ export default function AssistantDashboardVapi({
       let _planStartDate: Date | null = null;
       let _planStartMonthLabel: string | null = null;
 
-      if (rawStart && typeof rawStart?.toDate === "function") {
+      if (rawStart && typeof (rawStart as any)?.toDate === "function") {
         // Firestore Timestamp
-        _planStartDate = rawStart.toDate();
+        _planStartDate = (rawStart as Timestamp).toDate();
       } else if (typeof rawStart === "number" && isFinite(rawStart)) {
         // epoch ms
         _planStartDate = new Date(rawStart);
@@ -479,7 +489,11 @@ export default function AssistantDashboardVapi({
         _planStartDate = new Date(
           _planStartDate.getFullYear(),
           _planStartDate.getMonth(),
-          1, 0, 0, 0, 0
+          1,
+          0,
+          0,
+          0,
+          0
         );
         _planStartMonthLabel = _planStartDate.toLocaleString(undefined, {
           month: "long",
@@ -589,7 +603,7 @@ export default function AssistantDashboardVapi({
     planMonthlyFee?: number;
     planOverageFee?: number;
     planStartMonth?: string | null; // unused for logic, display only
-    planStartDate?: Date | null;    // preferred source for logic
+    planStartDate?: Date | null; // preferred source for logic
   }) {
     // Only block on planLoading if we DON'T have an override
     if (!override && (planLoading || planError)) return;
@@ -610,7 +624,9 @@ export default function AssistantDashboardVapi({
 
       const parsedStart =
         pStartDate ??
-        parsePlanStartMonth(override?.planStartMonth ?? planStartMonth ?? undefined);
+        parsePlanStartMonth(
+          override?.planStartMonth ?? planStartMonth ?? undefined
+        );
 
       const startFromPlan = parsedStart ?? startOfMonth(now);
       const months = monthRangeInclusive(startFromPlan, now);
@@ -648,7 +664,7 @@ export default function AssistantDashboardVapi({
         });
       }
 
-      // ✅ Newest month first (current month at top)
+      // Newest month first (current month at top)
       rows.reverse();
 
       setInvoiceRows(rows);
@@ -681,9 +697,6 @@ export default function AssistantDashboardVapi({
           <div className="text-sm text-red-600">{planError}</div>
         ) : (
           <div className="space-y-1 text-base">
-            {restaurantName && (
-              <div className="text-lg font-semibold">{restaurantName}</div>
-            )}
             <div>
               <span className="font-medium">Plan Type</span> — {planName || "—"}
             </div>
