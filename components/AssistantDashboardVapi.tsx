@@ -14,6 +14,7 @@ import {
 } from "firebase/firestore";
 import { app as firebaseApp } from "@/lib/firebase";
 import dynamic from "next/dynamic";
+import { useAuth } from "@/components/AuthProvider"; // ← added
 
 // Recharts (client-only)
 const ResponsiveContainer = dynamic(
@@ -256,6 +257,8 @@ export default function AssistantDashboardVapi({
   assistantId: string;
   pageSize?: number;
 }) {
+  const { profile, signOutUser } = useAuth(); // ← added
+
   // Period + custom range
   const [preset, setPreset] = useState<PresetKey>("today");
   const [customStart, setCustomStart] = useState<string>("");
@@ -668,6 +671,19 @@ export default function AssistantDashboardVapi({
     <div>
       {/* Plan header (shows on every view) */}
       <div className="rounded-xl bg-white border border-gray-200 p-4 mb-5">
+        {/* ← added row */}
+        <div className="flex items-center justify-between mb-2">
+          <div className="text-base font-semibold">
+            {profile?.restaurantName || profile?.name || "—"}
+          </div>
+          <button
+            onClick={signOutUser}
+            className="px-3 py-1.5 rounded-xl border bg-white hover:bg-gray-50"
+          >
+            Sign out
+          </button>
+        </div>
+        {/* existing content below unchanged */}
         {planLoading ? (
           <div className="text-sm text-gray-500">Loading plan…</div>
         ) : planError ? (
