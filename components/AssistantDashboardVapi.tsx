@@ -256,7 +256,7 @@ export default function AssistantDashboardVapi({
   pageSize?: number;
 }) {
   // Period + custom range
-  const [preset, setPreset] = useState<PresetKey>("today");
+  const [preset, setPreset] = useState<PresetKey>("this_month");
   const [customStart, setCustomStart] = useState<string>("");
   const [customEnd, setCustomEnd] = useState<string>("");
 
@@ -269,8 +269,7 @@ export default function AssistantDashboardVapi({
   const [drawerId, setDrawerId] = useState<string | null>(null);
 
   // View switch (+ Billing + Invoice)
-  const [view, setView] = useState<ViewMode>("log");
-
+  const [view, setView] = useState<ViewMode>("billing");
   // Sync state
   const [syncing, setSyncing] = useState<boolean>(false);
 
