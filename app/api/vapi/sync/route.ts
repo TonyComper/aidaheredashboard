@@ -10,7 +10,12 @@ function asDate(value: any): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
-/** Normalize one Vapi call object into our Firestore shape */
+function clip(value: any, max = 20000): string | null {
+  if (value == null) return null;
+  const s = String(value);
+  return s.length > max ? s.slice(0, max) : s;
+}
+
 function toCallRow(x: AnyObj, assistantIdFallback: string) {
   const id = x?.id ?? x?.callId ?? null;
 
@@ -91,10 +96,10 @@ function toCallRow(x: AnyObj, assistantIdFallback: string) {
     callDate: startedAt,
 
     durationSeconds,
-    recordingUrl,
-    transcript,
+    recordingUrl: recordingUrl ? String(recordingUrl) : null,
+    transcript: clip(transcript, 20000), // avoid giant docs
 
-    raw: x,
+    // no raw payload in bulk sync
     updatedAt: new Date(),
     createdAt: new Date(),
   };
@@ -106,6 +111,20 @@ function pickItems(payload: any): any[] {
   if (Array.isArray(payload?.data)) return payload.data;
   if (Array.isArray(payload?.calls)) return payload.calls;
   return [];
+}
+
+async function writeInChunks(rows: any[], chunkSize = 50) {
+  for (let i = 0; i < rows.length; i += chunkSize) {
+    const chunk = rows.slice(i, i + chunkSize);
+    const batch = adminDb.batch();
+
+    for (const r of chunk) {
+      const ref = adminDb.collection("callLogs").doc(String(r.id));
+      batch.set(ref, r, { merge: true });
+    }
+
+    await batch.commit();
+  }
 }
 
 export async function GET(req: NextRequest) {
@@ -124,12 +143,8 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "VAPI_API_KEY missing" }, { status: 500 });
     }
 
-    // Current Vapi Calls API
     const callsQS = new URLSearchParams();
     callsQS.set("limit", "200");
-
-    // Keep these for compatibility with your prior implementation.
-    // If Vapi ignores them, we'll still filter locally below.
     callsQS.set("assistantId", assistantId);
     if (start) callsQS.set("createdAtGe", start);
     if (end) callsQS.set("createdAtLe", end);
@@ -159,20 +174,17 @@ export async function GET(req: NextRequest) {
     const payload = await callsRes.json().catch(() => ({}));
 
     console.log("VAPI CALLS URL:", callsUrl);
-    console.log("VAPI CALLS RAW:", JSON.stringify(payload, null, 2));
-
+    console.log("VAPI CALLS TOP-LEVEL KEYS:", payload && typeof payload === "object" ? Object.keys(payload) : []);
     const apiItems = pickItems(payload);
     console.log("VAPI CALLS ITEM COUNT:", apiItems.length);
 
     const startDate = start ? asDate(start) : null;
     const endDate = end ? asDate(end) : null;
 
-    // Normalize first
     let rows = apiItems
       .map((x) => toCallRow(x, assistantId))
       .filter((r) => !!r.id);
 
-    // Filter locally as a safety net in case Vapi ignores query params
     rows = rows.filter((r) => r.assistantId === assistantId);
 
     if (startDate) {
@@ -185,12 +197,7 @@ export async function GET(req: NextRequest) {
     console.log("SYNC ROW COUNT AFTER LOCAL FILTER:", rows.length);
 
     if (rows.length > 0) {
-      const batch = adminDb.batch();
-      for (const r of rows) {
-        const ref = adminDb.collection("callLogs").doc(String(r.id));
-        batch.set(ref, r, { merge: true });
-      }
-      await batch.commit();
+      await writeInChunks(rows, 50);
     }
 
     return NextResponse.json(
