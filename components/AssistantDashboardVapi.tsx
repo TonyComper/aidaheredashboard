@@ -226,10 +226,16 @@ function KpiCard({
   subtitle?: string;
 }) {
   return (
-    <div className="rounded-2xl shadow p-5 bg-white border border-gray-100">
-      <div className="text-gray-500 text-sm">{title}</div>
-      <div className="text-3xl font-semibold mt-1 break-words">{value}</div>
-      {subtitle && <div className="text-xs text-gray-400 mt-1">{subtitle}</div>}
+    <div className="rounded-2xl bg-white shadow-sm border border-slate-200 p-6">
+<div className="text-slate-500 text-sm font-medium tracking-wide uppercase">
+  {title}
+</div>
+<div className="text-3xl md:text-4xl font-semibold text-slate-900 mt-2 break-words">
+  {value}
+</div>
+{subtitle && (
+  <div className="text-xs text-slate-400 mt-2">{subtitle}</div>
+)}
     </div>
   );
 }
@@ -668,10 +674,25 @@ export default function AssistantDashboardVapi({
     }
   }, [view, assistantId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return (
-    <div>
+return (
+  <div className="min-h-screen bg-gradient-to-br from-slate-100 to-slate-200 p-6 md:p-8">
+    <div className="flex items-center justify-between mb-6">
+  <div>
+    <h1 className="text-2xl md:text-3xl font-semibold text-slate-900">
+      Assistant Dashboard
+    </h1>
+    <p className="text-sm text-slate-500 mt-1">
+      Call analytics, billing, and invoice history
+    </p>
+  </div>
+
+  <div className="hidden sm:flex items-center gap-2 rounded-full bg-white/80 border border-slate-200 px-3 py-1.5 shadow-sm">
+    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" />
+    <span className="text-sm text-slate-600">Live</span>
+  </div>
+</div>
       {/* Plan info header (NO restaurant name or sign out here anymore) */}
-      <div className="rounded-xl bg-white border border-gray-200 p-4 mb-5">
+      <div className="rounded-2xl bg-white/90 backdrop-blur shadow-sm border border-slate-200 p-5 md:p-6 mb-6">
         {planLoading ? (
           <div className="text-sm text-gray-500">Loading plan…</div>
         ) : planError ? (
@@ -694,7 +715,7 @@ export default function AssistantDashboardVapi({
         <div>
           <label className="text-sm text-gray-600">Time Period</label>
           <select
-            className="w-full border rounded-xl p-2 mt-1"
+           className="w-full border border-slate-300 bg-white rounded-lg px-3 py-2 mt-1 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             value={preset}
             onChange={(e) => setPreset(e.target.value as PresetKey)}
           >
@@ -710,7 +731,7 @@ export default function AssistantDashboardVapi({
           <label className="text-sm text-gray-600">Custom Start</label>
           <input
             type="datetime-local"
-            className="w-full border rounded-xl p-2 mt-1"
+            className="w-full border border-slate-300 bg-white rounded-lg px-3 py-2 mt-1 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             value={customStart}
             onChange={(e) => setCustomStart(e.target.value)}
             disabled={preset !== "custom"}
@@ -720,7 +741,7 @@ export default function AssistantDashboardVapi({
           <label className="text-sm text-gray-600">Custom End</label>
           <input
             type="datetime-local"
-            className="w-full border rounded-xl p-2 mt-1"
+            className="w-full border border-slate-300 bg-white rounded-lg px-3 py-2 mt-1 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             value={customEnd}
             onChange={(e) => setCustomEnd(e.target.value)}
             disabled={preset !== "custom"}
@@ -733,7 +754,7 @@ export default function AssistantDashboardVapi({
         <div className="flex items-center gap-3">
           <button
             onClick={syncNow}
-            className="px-3 py-2 rounded-xl border bg-white hover:bg-gray-50"
+            className="px-4 py-2 rounded-lg bg-blue-600 text-white font-medium shadow-sm hover:bg-blue-700 disabled:opacity-50"
             disabled={syncing}
           >
             {syncing ? "Syncing…" : "Sync now"}
@@ -748,7 +769,7 @@ export default function AssistantDashboardVapi({
         <div className="ml-auto flex items-center gap-2">
           <span className="text-sm text-gray-600">View</span>
           <select
-            className="border rounded-xl p-2"
+            className="border border-slate-300 bg-white rounded-lg px-3 py-2 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             value={view}
             onChange={(e) => setView(e.target.value as ViewMode)}
           >
@@ -786,7 +807,7 @@ export default function AssistantDashboardVapi({
 
       {/* Conditional Views */}
       {view === "hourly" ? (
-        <div className="rounded-2xl shadow bg-white border border-gray-100 p-4">
+        <div className="rounded-2xl bg-white/95 backdrop-blur shadow-sm border border-slate-200 p-5 space-y-6">
           <div className="px-1 pb-3">
             <div className="font-medium">Hourly Analysis</div>
             <div className="text-sm text-gray-500">
@@ -812,7 +833,7 @@ export default function AssistantDashboardVapi({
           </div>
         </div>
       ) : view === "billing" ? (
-        <div className="rounded-2xl shadow bg-white border border-gray-100 p-5 space-y-6">
+        <div className="rounded-2xl bg-white/95 backdrop-blur shadow-sm border border-slate-200 p-5 space-y-6">
           <div>
             <div className="font-medium text-lg">Billing</div>
             <div className="text-sm text-gray-500">
@@ -899,7 +920,7 @@ export default function AssistantDashboardVapi({
           )}
         </div>
       ) : view === "invoice" ? (
-        <div className="rounded-2xl shadow bg-white border border-gray-100 overflow-hidden">
+        <div className="rounded-2xl bg-white/95 backdrop-blur shadow-sm border border-slate-200 overflow-hidden">
           <div className="px-5 py-4 border-b">
             <div className="font-medium">Invoice History</div>
             <div className="text-sm text-gray-500">
@@ -918,7 +939,7 @@ export default function AssistantDashboardVapi({
             <div className="overflow-x-auto">
               <table className="min-w-full">
                 <thead>
-                  <tr className="text-left text-xs uppercase text-gray-500">
+                  <tr className="text-left text-xs uppercase tracking-wide text-slate-500 bg-slate-50">
                     <th className="py-2 px-3">Month</th>
                     <th className="py-2 px-3">Plan Name</th>
                     <th className="py-2 px-3 text-right">Plan Monthly Fee</th>
@@ -973,7 +994,7 @@ export default function AssistantDashboardVapi({
           )}
         </div>
       ) : (
-        <div className="rounded-2xl shadow bg-white border border-gray-100 overflow-hidden">
+        <div className="rounded-2xl bg-white/95 backdrop-blur shadow-sm border border-slate-200 overflow-hidden">
           <div className="px-5 py-4 border-b">
             <div className="font-medium">Call Log</div>
             <div className="text-sm text-gray-500">
@@ -1018,7 +1039,7 @@ export default function AssistantDashboardVapi({
                     return (
                       <tr
                         key={it.id}
-                        className="border-b last:border-0 hover:bg-gray-50"
+                        className="border-b border-slate-100 last:border-0 hover:bg-slate-50/80 transition-colors"
                       >
                         <td className="py-2 px-3 whitespace-nowrap text-sm">
                           {fmtDate(it.startTime)}
