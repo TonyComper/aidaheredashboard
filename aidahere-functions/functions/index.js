@@ -2351,7 +2351,7 @@ const RESTAURANT_THEME_META = {
 
 async function buildRestaurantReputationPhase1Report({ restaurantCode, restaurantDisplayName, reviews, apiKey }) {
   const nowMs = Date.now();
-  const windowMs = 30 * 24 * 60 * 60 * 1000;
+  const windowMs = 90 * 24 * 60 * 60 * 1000;
   const startMs = nowMs - windowMs;
 
   const norm = (Array.isArray(reviews) ? reviews : [])
@@ -2570,7 +2570,7 @@ async function buildRestaurantReputationPhase1Report({ restaurantCode, restauran
     ok: true,
     restaurantCode,
     restaurantDisplayName: restaurantDisplayName || "",
-    window: { label: "Last 30 days", startMs, endMs: nowMs },
+    window: { label: "Last 90 days", startMs, endMs: nowMs },
     counts: {
       totalTextReviews,
       avgRating,
@@ -2605,7 +2605,7 @@ async function buildRestaurantReputationPhase2Report({
   restaurantTimeZone = "America/Toronto",
 }) {
   const nowMs = Date.now();
-  const windowMs = 30 * 24 * 60 * 60 * 1000;
+  const windowMs = 90 * 24 * 60 * 60 * 1000;
   const startMs = nowMs - windowMs;
 
   const last7dStart = nowMs - 7 * 24 * 60 * 60 * 1000;
@@ -2829,7 +2829,7 @@ async function buildRestaurantReputationPhase2Report({
     ok: true,
     restaurantCode,
     restaurantDisplayName: restaurantDisplayName || "",
-    window: { label: "Last 30 days", startMs, endMs: nowMs, timeZone: restaurantTimeZone },
+    window: { label: "Last 90 days", startMs, endMs: nowMs, timeZone: restaurantTimeZone },
     counts: {
       totalTextReviews,
       avgRating,
@@ -3341,7 +3341,7 @@ exports.refreshRestaurantReputation = onRequest(
       const basePath = `restaurants/${restaurantCode}/reputation/serpapi`;
 
       const nowMs = Date.now();
-      const cutoffMs = nowMs - 30 * 24 * 60 * 60 * 1000;
+      const cutoffMs = nowMs - 90 * 24 * 60 * 60 * 1000;
 
       const { reviews } = await fetchSerpApiReviews({
         apiKey: apiKeySerp,
@@ -3356,7 +3356,7 @@ exports.refreshRestaurantReputation = onRequest(
       for (const r of reviews) {
         const iso = r?.iso_date || r?.iso_date_of_last_edit || "";
         const dateMs = toMsFromIso(iso);
-
+      
         if (!dateMs || dateMs < cutoffMs) continue;
 
         const text =
@@ -3392,9 +3392,25 @@ exports.refreshRestaurantReputation = onRequest(
         };
       }
 
+      const storedReviews = Object.keys(updates).length;
+      
       if (Object.keys(updates).length > 0) {
         await db.ref().update(updates);
       }
+
+      await db.ref(`${basePath}/meta`).update({
+  ok: true,
+  restaurantCode,
+  placeId,
+  serpDataId,
+  hl: "en",
+  maxPages: 8,
+  fetchedAtMs: nowMs,
+  cutoffMs,
+  cutoffIso: new Date(cutoffMs).toISOString(),
+  storedReviews,
+  note: "Manual refresh for Restaurant Phase 1 + Phase 2",
+});
 
       const reviewsSnap = await db.ref(`${basePath}/reviews`).get();
       const reviewsObj = reviewsSnap.val() || {};
@@ -3428,12 +3444,14 @@ exports.refreshRestaurantReputation = onRequest(
         snapshotDayKey: nowKey,
       });
 
-      return res.json({
-        ok: true,
-        restaurantCode,
-        totalReviews: reviewsArr.length,
-        risingThemes: phase2Report?.trend?.risingThemes?.length || 0,
-      });
+return res.json({
+  ok: true,
+  restaurantCode,
+  totalReviews: reviewsArr.length,
+  storedReviews,
+  risingThemes: phase2Report?.trend?.risingThemes?.length || 0,
+});
+
     } catch (err) {
       console.error("refreshRestaurantReputation error:", err);
       return res.status(500).json({ ok: false, error: String(err?.message || err) });

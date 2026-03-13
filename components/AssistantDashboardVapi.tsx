@@ -52,7 +52,13 @@ type CallRow = {
   transcript?: string | null;
 };
 
-type ViewMode = "log" | "hourly" | "billing" | "invoice";
+type ViewMode =
+  | "log"
+  | "hourly"
+  | "billing"
+  | "invoice"
+  | "restaurantPhase1"
+  | "restaurantPhase2";
 
 // ----------------- Local-time date helpers -----------------
 function startOfDay(d = new Date()) {
@@ -304,6 +310,11 @@ export default function AssistantDashboardVapi({
   const [invoiceLoading, setInvoiceLoading] = useState<boolean>(false);
   const [invoiceError, setInvoiceError] = useState<string | null>(null);
   const [invoiceRows, setInvoiceRows] = useState<InvoiceRow[]>([]);
+  const [restaurantRepLoading, setRestaurantRepLoading] = useState<boolean>(false);
+  const [restaurantRepError, setRestaurantRepError] = useState<string | null>(null);
+  const [restaurantPhase1, setRestaurantPhase1] = useState<any>(null);
+  const [restaurantPhase2, setRestaurantPhase2] = useState<any>(null);
+  const [restaurantMeta, setRestaurantMeta] = useState<any>(null);
 
   // Resolve the date range (local time)
   const { start, end } = useMemo(() => {
@@ -664,15 +675,66 @@ export default function AssistantDashboardVapi({
     }
   }
 
-  // Reload plan then invoice when switching to Invoice view (using fresh values)
-  useEffect(() => {
-    if (view === "invoice") {
-      (async () => {
-        const fresh = await loadBillingPlan();
-        await loadInvoiceHistory(fresh ?? undefined);
-      })();
+async function loadRestaurantReputation() {
+  setRestaurantRepLoading(true);
+  setRestaurantRepError(null);
+
+  try {
+    const restaurantCode = "calwch";
+
+    const [phase1Res, phase2Res] = await Promise.all([
+      fetch(
+        `https://us-central1-askaida-dashboard.cloudfunctions.net/getRestaurantReputationPhase1?restaurantCode=${restaurantCode}`
+      ),
+      fetch(
+        `https://us-central1-askaida-dashboard.cloudfunctions.net/getRestaurantReputationPhase2?restaurantCode=${restaurantCode}`
+      ),
+    ]);
+
+    const phase1Json = await phase1Res.json().catch(() => null);
+    const phase2Json = await phase2Res.json().catch(() => null);
+
+    if (!phase1Res.ok && !phase2Res.ok) {
+      throw new Error("Failed to load restaurant reputation data.");
     }
-  }, [view, assistantId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    setRestaurantPhase1(phase1Json?.data || null);
+    setRestaurantPhase2(phase2Json?.data || null);
+
+    // optional lightweight meta from phase 2 ops/counts if available now
+    setRestaurantMeta({
+      storedReviews:
+        phase2Json?.data?.ops?.storedReviews ??
+        phase1Json?.data?.ops?.storedReviews ??
+        null,
+      totalTextReviews:
+        phase2Json?.data?.counts?.totalTextReviews ??
+        phase1Json?.data?.counts?.totalTextReviews ??
+        null,
+    });
+  } catch (e) {
+    setRestaurantRepError(
+      e instanceof Error ? e.message : "Failed to load restaurant reputation."
+    );
+  } finally {
+    setRestaurantRepLoading(false);
+  }
+}
+
+  // Reload plan then invoice when switching to Invoice view (using fresh values)
+
+useEffect(() => {
+  if (view === "invoice") {
+    (async () => {
+      const fresh = await loadBillingPlan();
+      await loadInvoiceHistory(fresh ?? undefined);
+    })();
+  }
+
+  if (view === "restaurantPhase1" || view === "restaurantPhase2") {
+    void loadRestaurantReputation();
+  }
+}, [view, assistantId]);
 
 return (
   <div className="min-h-screen bg-gradient-to-br from-slate-100 to-slate-200 p-6 md:p-8">
@@ -777,6 +839,8 @@ return (
             <option value="hourly">Hourly Analysis</option>
             <option value="billing">Billing</option>
             <option value="invoice">Invoice History</option>
+            <option value="restaurantPhase1">Restaurant Reputation Phase 1</option>
+            <option value="restaurantPhase2">Restaurant Reputation Phase 2</option>
           </select>
         </div>
       </div>
@@ -990,6 +1054,185 @@ return (
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+        </div>
+            ) : view === "restaurantPhase1" ? (
+        <div className="rounded-2xl bg-white/95 backdrop-blur shadow-sm border border-slate-200 p-5 space-y-6">
+          <div>
+            <div className="font-medium text-lg">Restaurant Reputation — Phase 1</div>
+            <div className="text-sm text-gray-500">
+              Narrative reputation summary for California Sandwiches Winston Churchill
+            </div>
+          </div>
+
+          {restaurantRepLoading ? (
+            <div className="text-gray-500">Loading reputation analysis…</div>
+          ) : restaurantRepError ? (
+            <div className="text-red-600">{restaurantRepError}</div>
+          ) : !restaurantPhase1 ? (
+            <div className="text-gray-400">No Phase 1 restaurant reputation data.</div>
+          ) : (
+            <div className="space-y-5">
+              <div className="rounded-xl border bg-gray-50 p-4">
+                <div className="text-sm text-gray-500">Risk Level</div>
+                <div className="text-2xl font-semibold mt-1">
+                  {restaurantPhase1?.answers?.reputationRiskLevel || "N/A"}
+                </div>
+              </div>
+
+              <div>
+                <div className="font-medium mb-1">Consistent Complaints</div>
+                <div className="text-sm text-gray-700">
+                  {restaurantPhase1?.answers?.consistentComplaints || "—"}
+                </div>
+              </div>
+
+              <div>
+                <div className="font-medium mb-1">Rising Theme</div>
+                <div className="text-sm text-gray-700">
+                  {restaurantPhase1?.answers?.risingTheme || "—"}
+                </div>
+              </div>
+
+              <div>
+                <div className="font-medium mb-1">Brand Damage</div>
+                <div className="text-sm text-gray-700">
+                  {restaurantPhase1?.answers?.brandDamage || "—"}
+                </div>
+              </div>
+
+              <div>
+                <div className="font-medium mb-2">Fix Immediately</div>
+                <ul className="list-disc pl-5 space-y-1 text-sm text-gray-700">
+                  {(restaurantPhase1?.answers?.fixImmediately || []).map(
+                    (x: string, i: number) => (
+                      <li key={i}>{x}</li>
+                    )
+                  )}
+                </ul>
+              </div>
+
+              <div>
+                <div className="font-medium mb-2">Requires Capital</div>
+                <ul className="list-disc pl-5 space-y-1 text-sm text-gray-700">
+                  {(restaurantPhase1?.answers?.requiresCapital || []).map(
+                    (x: string, i: number) => (
+                      <li key={i}>{x}</li>
+                    )
+                  )}
+                </ul>
+              </div>
+            </div>
+          )}
+        </div>
+            ) : view === "restaurantPhase2" ? (
+        <div className="rounded-2xl bg-white/95 backdrop-blur shadow-sm border border-slate-200 p-5 space-y-6">
+          <div>
+            <div className="font-medium text-lg">Restaurant Reputation — Phase 2</div>
+            <div className="text-sm text-gray-500">
+              Trend and theme analysis for California Sandwiches Winston Churchill
+            </div>
+          </div>
+
+          {restaurantRepLoading ? (
+            <div className="text-gray-500">Loading reputation analysis…</div>
+          ) : restaurantRepError ? (
+            <div className="text-red-600">{restaurantRepError}</div>
+          ) : !restaurantPhase2 ? (
+            <div className="text-gray-400">No Phase 2 restaurant reputation data.</div>
+          ) : (
+            <div className="space-y-5">
+              <div className="grid sm:grid-cols-3 gap-4">
+                <div className="rounded-xl border bg-gray-50 p-4">
+                  <div className="text-sm text-gray-500">Risk Level</div>
+                  <div className="text-2xl font-semibold mt-1">
+                    {restaurantPhase2?.trend?.riskLevel || "N/A"}
+                  </div>
+                </div>
+
+                <div className="rounded-xl border bg-gray-50 p-4">
+                  <div className="text-sm text-gray-500">Written Reviews Analyzed</div>
+                  <div className="text-2xl font-semibold mt-1">
+                    {restaurantPhase2?.counts?.totalTextReviews ?? "0"}
+                  </div>
+                </div>
+
+                <div className="rounded-xl border bg-gray-50 p-4">
+                  <div className="text-sm text-gray-500">Average Rating</div>
+                  <div className="text-2xl font-semibold mt-1">
+                    {restaurantPhase2?.counts?.avgRating ?? "—"}
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <div className="font-medium mb-1">Executive Summary</div>
+                <div className="text-sm text-gray-700">
+                  {restaurantPhase2?.narrative?.executiveSummary || "—"}
+                </div>
+              </div>
+
+              <div>
+                <div className="font-medium mb-1">What Changed This Week</div>
+                <div className="text-sm text-gray-700">
+                  {restaurantPhase2?.narrative?.whatChangedThisWeek || "—"}
+                </div>
+              </div>
+
+<div>
+  <div className="font-medium mb-2">Top Risks</div>
+  <div className="space-y-3">
+    {(restaurantPhase2?.narrative?.topRisks || []).map((x: any, i: number) => (
+      <div key={i} className="rounded-xl border p-3 bg-gray-50">
+        <div className="font-medium">{x?.theme || "Risk"}</div>
+        <div className="text-sm text-gray-700 mt-1">
+          {x?.impact || "—"}
+        </div>
+        <div className="text-xs text-gray-500 mt-1">
+          {x?.evidence || "—"}
+        </div>
+      </div>
+    ))}
+  </div>
+</div>
+
+<div>
+  <div className="font-medium mb-2">Top Fixes (No Capex)</div>
+
+  <div className="space-y-3">
+    {(restaurantPhase2?.narrative?.topFixesNoCapex || []).map(
+      (x: any, i: number) => (
+        <div key={i} className="rounded-lg border p-3 bg-gray-50">
+          <div className="font-medium">{x?.theme || "Fix"}</div>
+
+          <div className="text-sm text-gray-700 mt-1">
+            {x?.impact || ""}
+          </div>
+
+          <div className="text-xs text-gray-500 mt-1">
+            {x?.evidence || ""}
+          </div>
+        </div>
+      )
+    )}
+  </div>
+</div>
+
+              <div>
+                <div className="font-medium mb-2">Rising Themes</div>
+                <div className="space-y-3">
+                  {(restaurantPhase2?.trend?.risingThemes || []).map((t: any, i: number) => (
+                    <div key={i} className="rounded-xl border p-3 bg-gray-50">
+                      <div className="font-medium">{t?.title || t?.themeId || "Theme"}</div>
+                      <div className="text-sm text-gray-600 mt-1">
+                        Mentions: {t?.mentions ?? 0} · Last 7d: {t?.mentionsLast7d ?? 0} · Prior:{" "}
+                        {t?.mentionsPrior23d ?? 0}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
           )}
         </div>
