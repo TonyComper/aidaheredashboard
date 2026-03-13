@@ -1758,7 +1758,14 @@ function toMsFromIso(iso) {
   return Number.isNaN(t) ? null : t;
 }
 
-async function fetchSerpApiReviews({ apiKey, placeId = "", dataId = "", hl = "en", maxPages = 8 }) {
+async function fetchSerpApiReviews({
+  apiKey,
+  placeId = "",
+  dataId = "",
+  hl = "en",
+  maxPages = 25,
+  sortBy = "newestFirst",
+  }) {
   let page = 0;
   let nextPageToken = null;
 
@@ -1779,7 +1786,7 @@ if (dataId) {
 }
 
 params.set("hl", hl);
-params.set("sort_by", "newestFirst");
+params.set("sort_by", sortBy);
 params.set("api_key", apiKey);
 
 if (nextPageToken) params.set("next_page_token", nextPageToken);
@@ -1811,6 +1818,62 @@ if (nextPageToken) params.set("next_page_token", nextPageToken);
   }
 
   return { reviews: out, pagesFetched: page };
+}
+
+async function fetchSerpApiPlaceSignals({
+  apiKey,
+  placeId = "",
+  dataId = "",
+  hl = "en",
+}) {
+  const params = new URLSearchParams();
+  params.set("engine", "google_maps");
+
+  if (placeId) {
+    params.set("place_id", placeId);
+  } else if (dataId) {
+    params.set("data_id", dataId);
+  } else {
+    throw new Error("fetchSerpApiPlaceSignals requires placeId or dataId");
+  }
+
+  params.set("hl", hl);
+  params.set("api_key", apiKey);
+
+  const url = `https://serpapi.com/search.json?${params.toString()}`;
+  const resp = await fetch(url);
+  const data = await resp.json().catch(() => ({}));
+
+  if (!resp.ok) {
+    throw new Error(`serp_place_signals_failed_${resp.status}`);
+  }
+
+  const placeResults = data?.place_results || {};
+
+  const placeReviews = Array.isArray(placeResults?.reviews)
+    ? placeResults.reviews
+    : [];
+
+  const userReviews = Array.isArray(placeResults?.user_reviews)
+    ? placeResults.user_reviews
+    : [];
+
+  const ratingCount =
+    placeResults?.user_ratings_total ??
+    placeResults?.rating_count ??
+    (typeof placeResults?.reviews === "number" ? placeResults.reviews : null) ??
+    null;
+
+  return {
+    placeName: safeTrim(placeResults?.title || ""),
+    rating: typeof placeResults?.rating === "number" ? placeResults.rating : null,
+    userRatingsTotal: ratingCount,
+    dataId: safeTrim(placeResults?.data_id || dataId || ""),
+    dataCid: safeTrim(placeResults?.data_cid || ""),
+    reviews: placeReviews,
+    userReviews,
+    raw: placeResults,
+  };
 }
 
 async function resolveSerpPlaceIdsFromGooglePlaceId({
@@ -1893,6 +1956,8 @@ async function resolveSerpPlaceIdsFromGooglePlaceId({
     debugTopLevelKeys: Object.keys(localData || {}),
   };
 }
+
+
 
 /* --------------------------- HTTPS: resolveSerpDataIdForRestaurant --------------------------- */
 
@@ -3343,55 +3408,97 @@ exports.refreshRestaurantReputation = onRequest(
       const nowMs = Date.now();
       const cutoffMs = nowMs - 90 * 24 * 60 * 60 * 1000;
 
-      const { reviews } = await fetchSerpApiReviews({
-        apiKey: apiKeySerp,
-        dataId: serpDataId,
-        placeId,
-        hl: "en",
-        maxPages: 8,
-      });
+const newestResp = await fetchSerpApiReviews({
+  apiKey: apiKeySerp,
+  dataId: serpDataId,
+  placeId,
+  hl: "en",
+  maxPages: 25,
+  sortBy: "newestFirst",
+});
 
-      const updates = {};
+const highestResp = await fetchSerpApiReviews({
+  apiKey: apiKeySerp,
+  dataId: serpDataId,
+  placeId,
+  hl: "en",
+  maxPages: 25,
+  sortBy: "highestRating",
+});
 
-      for (const r of reviews) {
-        const iso = r?.iso_date || r?.iso_date_of_last_edit || "";
-        const dateMs = toMsFromIso(iso);
-      
-        if (!dateMs || dateMs < cutoffMs) continue;
+const lowestResp = await fetchSerpApiReviews({
+  apiKey: apiKeySerp,
+  dataId: serpDataId,
+  placeId,
+  hl: "en",
+  maxPages: 25,
+  sortBy: "lowestRating",
+});
 
-        const text =
-          (r?.text || r?.snippet || r?.extracted_snippet?.original || "")
-            .toString()
-            .trim();
+const reviews = [
+  ...(Array.isArray(newestResp?.reviews) ? newestResp.reviews : []),
+  ...(Array.isArray(highestResp?.reviews) ? highestResp.reviews : []),
+  ...(Array.isArray(lowestResp?.reviews) ? lowestResp.reviews : []),
+];
 
-        if (!text) continue;
+const uniqueReviews = Object.values(
+  reviews.reduce((acc, r) => {
+    const key = r?.review_id || r?.reviewId || null;
+    if (key) acc[key] = r;
+    return acc;
+  }, {})
+);
 
-        const reviewId = sanitizeDbKey(
-          r?.review_id || `serp_${r?.user?.name || "anon"}_${iso || Date.now()}`
-        );
 
-        updates[`${basePath}/reviews/${reviewId}`] = {
-          reviewId,
-          source: safeTrim(r?.source || "Google"),
-          rating: typeof r?.rating === "number" ? r.rating : null,
-          dateMs,
-          isoDate: safeTrim(iso),
-          authorName: safeTrim(r?.user?.name || ""),
-          authorLink: safeTrim(r?.user?.link || ""),
-          snippet: safeTrim(r?.snippet || ""),
-          text,
-          language: "en",
-          likes: typeof r?.likes === "number" ? r.likes : 0,
-          hasResponse: !!r?.response,
-          responseText: safeTrim(
-            r?.response?.extracted_snippet?.original ||
-              r?.response?.snippet ||
-              ""
-          ),
-          fetchedAtMs: nowMs,
-        };
-      }
+const placeSignals = await fetchSerpApiPlaceSignals({
+  apiKey: apiKeySerp,
+  dataId: serpDataId,
+  placeId,
+  hl: "en",
+});
 
+console.log("placeSignals", JSON.stringify(placeSignals, null, 2));
+
+const updates = {};
+
+for (const r of uniqueReviews) {
+  const iso = r?.iso_date || r?.iso_date_of_last_edit || "";
+  const dateMs = toMsFromIso(iso);
+
+  if (!dateMs || dateMs < cutoffMs) continue;
+
+  const text =
+    (r?.text || r?.snippet || r?.extracted_snippet?.original || "")
+      .toString()
+      .trim();
+
+  if (!text) continue;
+
+  const reviewId = sanitizeDbKey(
+    r?.review_id || `serp_${r?.user?.name || "anon"}_${iso || Date.now()}`
+  );
+
+  updates[`${basePath}/reviews/${reviewId}`] = {
+    reviewId,
+    source: safeTrim(r?.source || "Google"),
+    rating: typeof r?.rating === "number" ? r.rating : null,
+    dateMs,
+    isoDate: safeTrim(iso),
+    authorName: safeTrim(r?.user?.name || ""),
+    authorLink: safeTrim(r?.user?.link || ""),
+    snippet: safeTrim(r?.snippet || ""),
+    text,
+    language: "en",
+    likes: typeof r?.likes === "number" ? r.likes : 0,
+    hasResponse: !!r?.response,
+    responseText: safeTrim(
+      r?.response?.extracted_snippet?.original ||
+        r?.response?.snippet ||
+        ""
+    ),
+    fetchedAtMs: nowMs,
+  };
+}
       const storedReviews = Object.keys(updates).length;
       
       if (Object.keys(updates).length > 0) {
@@ -3399,18 +3506,20 @@ exports.refreshRestaurantReputation = onRequest(
       }
 
       await db.ref(`${basePath}/meta`).update({
-  ok: true,
-  restaurantCode,
-  placeId,
-  serpDataId,
-  hl: "en",
-  maxPages: 8,
-  fetchedAtMs: nowMs,
-  cutoffMs,
-  cutoffIso: new Date(cutoffMs).toISOString(),
-  storedReviews,
-  note: "Manual refresh for Restaurant Phase 1 + Phase 2",
-});
+      ok: true,
+      restaurantCode,
+      placeId,
+      serpDataId,
+      hl: "en",
+      maxPages: 25,
+      fetchedAtMs: nowMs,
+      cutoffMs,
+      cutoffIso: new Date(cutoffMs).toISOString(),
+      storedReviews,
+      googleTotalRatings: placeSignals?.userRatingsTotal || null,
+      googleRating: placeSignals?.rating || null,
+      note: "Manual refresh for Restaurant Phase 1 + Phase 2",
+    });
 
       const reviewsSnap = await db.ref(`${basePath}/reviews`).get();
       const reviewsObj = reviewsSnap.val() || {};

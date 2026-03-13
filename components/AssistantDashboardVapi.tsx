@@ -1060,9 +1060,10 @@ return (
               </table>
             </div>
           )}
+
         </div>
             ) : view === "restaurantPhase1" ? (
-        <div className="rounded-2xl bg-white/95 backdrop-blur shadow-sm border border-slate-200 p-5 space-y-6">
+        <div className="rounded-2xl bg-emerald-50 backdrop-blur shadow-sm border border-emerald-200 p-5 space-y-6">
           <div>
             <div className="font-medium text-lg">Restaurant Reputation — Phase 1</div>
             <div className="text-sm text-gray-500">
@@ -1078,7 +1079,7 @@ return (
             <div className="text-gray-400">No Phase 1 restaurant reputation data.</div>
           ) : (
             <div className="space-y-5">
-              <div className="rounded-xl border bg-gray-50 p-4">
+              <div className="rounded-xl border bg-white p-4">
                 <div className="text-sm text-gray-500">Risk Level</div>
                 <div className="text-2xl font-semibold mt-1">
                   {restaurantPhase1?.answers?.reputationRiskLevel || "N/A"}
@@ -1108,28 +1109,39 @@ return (
 
               <div>
                 <div className="font-medium mb-2">Fix Immediately</div>
-                <ul className="list-disc pl-5 space-y-1 text-sm text-gray-700">
-                  {(restaurantPhase1?.answers?.fixImmediately || []).map(
-                    (x: string, i: number) => (
-                      <li key={i}>{x}</li>
-                    )
-                  )}
-                </ul>
+                <div className="space-y-3">
+                  {(restaurantPhase1?.answers?.fixImmediately || []).map((x: any, i: number) => (
+                    <div key={i} className="rounded-xl border p-3 bg-white">
+                      <div className="font-medium">
+                        {typeof x === "string" ? x : x?.issue || "Fix"}
+                      </div>
+                      {typeof x !== "string" && x?.evidence ? (
+                        <div className="text-xs text-gray-500 mt-1">{x.evidence}</div>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
               </div>
 
               <div>
                 <div className="font-medium mb-2">Requires Capital</div>
-                <ul className="list-disc pl-5 space-y-1 text-sm text-gray-700">
-                  {(restaurantPhase1?.answers?.requiresCapital || []).map(
-                    (x: string, i: number) => (
-                      <li key={i}>{x}</li>
-                    )
-                  )}
-                </ul>
+                <div className="space-y-3">
+                  {(restaurantPhase1?.answers?.requiresCapital || []).map((x: any, i: number) => (
+                    <div key={i} className="rounded-xl border p-3 bg-white">
+                      <div className="font-medium">
+                        {typeof x === "string" ? x : x?.issue || "Capital Item"}
+                      </div>
+                      {typeof x !== "string" && x?.evidence ? (
+                        <div className="text-xs text-gray-500 mt-1">{x.evidence}</div>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           )}
         </div>
+
             ) : view === "restaurantPhase2" ? (
         <div className="rounded-2xl bg-white/95 backdrop-blur shadow-sm border border-slate-200 p-5 space-y-6">
           <div>
