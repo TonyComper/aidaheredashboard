@@ -311,6 +311,7 @@ export default function AssistantDashboardVapi({
   const [invoiceLoading, setInvoiceLoading] = useState<boolean>(false);
   const [invoiceError, setInvoiceError] = useState<string | null>(null);
   const [invoiceRows, setInvoiceRows] = useState<InvoiceRow[]>([]);
+  const authCtx = useAuth() as any;
   const [restaurantRepLoading, setRestaurantRepLoading] = useState<boolean>(false);
   const [restaurantRepError, setRestaurantRepError] = useState<string | null>(null);
   const [restaurantPhase1, setRestaurantPhase1] = useState<any>(null);
