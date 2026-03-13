@@ -13,6 +13,7 @@ import {
 } from "firebase/firestore";
 import { app as firebaseApp } from "@/lib/firebase";
 import dynamic from "next/dynamic";
+import { useAuth } from "@/components/AuthProvider";
 
 // Recharts (client-only)
 const ResponsiveContainer = dynamic(
@@ -680,7 +681,9 @@ async function loadRestaurantReputation() {
   setRestaurantRepError(null);
 
   try {
-    const restaurantCode = "calwch";
+    const restaurantCode = authCtx?.profile?.restaurantCode || null;
+
+    if (!restaurantCode) return;
 
     const [phase1Res, phase2Res] = await Promise.all([
       fetch(
@@ -1237,7 +1240,7 @@ return (
           )}
         </div>
       ) : (
-        <div className="rounded-2xl bg-white/95 backdrop-blur shadow-sm border border-slate-200 overflow-hidden">
+          <div className="rounded-2xl bg-green-50 backdrop-blur shadow-sm border border-green-200 overflow-hidden">
           <div className="px-5 py-4 border-b">
             <div className="font-medium">Call Log</div>
             <div className="text-sm text-gray-500">
