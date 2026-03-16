@@ -125,36 +125,70 @@ function classifyTranscript(transcript: string | null) {
     };
   }
 
-  const complaintPhrases = [
-    "late",
-    "cold",
-    "missing",
+  const strongComplaintPhrases = [
+    "food was cold",
+    "order was cold",
+    "my order is late",
+    "order is late",
     "wrong order",
+    "missing item",
+    "missing items",
+    "forgot my",
+    "want a refund",
+    "need a refund",
+    "bad service",
+    "rude staff",
+    "i have a complaint",
+    "this is a complaint",
+  ];
+
+  const weakComplaintPhrases = [
+    "cold",
+    "late",
+    "missing",
     "forgot",
     "refund",
     "problem",
-    "complaint",
     "not happy",
     "disappointed",
-    "bad service",
     "rude",
-    "speak to the manager",
-    "speak to the owner",
   ];
 
-  const matchedPhrases = complaintPhrases.filter((phrase) => text.includes(phrase));
-  const containsComplaint = matchedPhrases.length > 0;
+  const strongMatches = strongComplaintPhrases.filter((phrase) => text.includes(phrase));
+  const weakMatches = weakComplaintPhrases.filter((phrase) => text.includes(phrase));
 
-  const callType =
-    containsComplaint
-      ? "complaint"
-      : text.includes("order") || text.includes("pickup") || text.includes("pick up") || text.includes("delivery")
-      ? "order"
-      : text.includes("manager")
-      ? "manager_request"
-      : text.includes("owner")
-      ? "owner_request"
-      : "other";
+  const containsComplaint =
+    strongMatches.length > 0 || weakMatches.length >= 2;
+
+  const matchedPhrases = [...strongMatches, ...weakMatches];
+
+  const isOrder =
+    text.includes("i'd like to order") ||
+    text.includes("i would like to order") ||
+    text.includes("place an order") ||
+    text.includes("pickup order") ||
+    text.includes("pick up order") ||
+    text.includes("for pickup") ||
+    text.includes("for delivery");
+
+  const isManagerRequest =
+    text.includes("speak to the manager") ||
+    text.includes("speak to a manager");
+
+  const isOwnerRequest =
+    text.includes("speak to the owner");
+
+  let callType = "other";
+
+  if (containsComplaint) {
+    callType = "complaint";
+  } else if (isOrder) {
+    callType = "order";
+  } else if (isManagerRequest) {
+    callType = "manager_request";
+  } else if (isOwnerRequest) {
+    callType = "owner_request";
+  }
 
   return {
     callType,
@@ -185,7 +219,7 @@ async function writeInChunks(rows: any[], chunkSize = 50) {
         { merge: true }
       );
 
-      if (analysis.containsComplaint) {
+      if (false && analysis.containsComplaint) {
         const complaintRef = adminDb
           .collection("restaurants")
           .doc(String(r.assistantId || "unknown"))
