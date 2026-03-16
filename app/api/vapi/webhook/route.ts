@@ -274,6 +274,51 @@ export async function POST(req: NextRequest) {
 
     await ref.set(docData, { merge: true });
 
+if (normalized.transcript && normalized.transcript.trim()) {
+  const t = normalized.transcript.toLowerCase();
+
+  const complaintPhrases = [
+    "late",
+    "cold",
+    "missing",
+    "wrong order",
+    "forgot",
+    "refund",
+    "problem",
+    "complaint",
+    "not happy",
+    "disappointed",
+    "bad service",
+    "rude",
+    "speak to the manager",
+    "speak to the owner",
+  ];
+
+  const matchedPhrases = complaintPhrases.filter((phrase) => t.includes(phrase));
+  const containsComplaint = matchedPhrases.length > 0;
+
+  const callType =
+    containsComplaint ? "complaint" :
+    t.includes("order") || t.includes("pickup") || t.includes("pick up") || t.includes("delivery")
+      ? "order"
+      : t.includes("manager")
+      ? "manager_request"
+      : t.includes("owner")
+      ? "owner_request"
+      : "other";
+
+  await ref.collection("analysis").doc("latest").set(
+    {
+      callType,
+      containsComplaint,
+      matchedPhrases,
+      transcriptPreview: normalized.transcript.slice(0, 500),
+      createdAt: new Date(),
+    },
+    { merge: true }
+  );
+}
+
     console.log("VAPI WEBHOOK UPSERT OK:", {
       id: normalized.id,
       assistantId: normalized.assistantId,
