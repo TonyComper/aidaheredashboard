@@ -113,6 +113,57 @@ function pickItems(payload: any): any[] {
   return [];
 }
 
+function classifyTranscript(transcript: string | null) {
+  const text = (transcript || "").toLowerCase().trim();
+
+  if (!text) {
+    return {
+      callType: "other",
+      containsComplaint: false,
+      matchedPhrases: [] as string[],
+      transcriptPreview: "",
+    };
+  }
+
+  const complaintPhrases = [
+    "late",
+    "cold",
+    "missing",
+    "wrong order",
+    "forgot",
+    "refund",
+    "problem",
+    "complaint",
+    "not happy",
+    "disappointed",
+    "bad service",
+    "rude",
+    "speak to the manager",
+    "speak to the owner",
+  ];
+
+  const matchedPhrases = complaintPhrases.filter((phrase) => text.includes(phrase));
+  const containsComplaint = matchedPhrases.length > 0;
+
+  const callType =
+    containsComplaint
+      ? "complaint"
+      : text.includes("order") || text.includes("pickup") || text.includes("pick up") || text.includes("delivery")
+      ? "order"
+      : text.includes("manager")
+      ? "manager_request"
+      : text.includes("owner")
+      ? "owner_request"
+      : "other";
+
+  return {
+    callType,
+    containsComplaint,
+    matchedPhrases,
+    transcriptPreview: transcript ? transcript.slice(0, 500) : "",
+  };
+}
+
 async function writeInChunks(rows: any[], chunkSize = 50) {
   for (let i = 0; i < rows.length; i += chunkSize) {
     const chunk = rows.slice(i, i + chunkSize);
@@ -121,6 +172,18 @@ async function writeInChunks(rows: any[], chunkSize = 50) {
     for (const r of chunk) {
       const ref = adminDb.collection("callLogs").doc(String(r.id));
       batch.set(ref, r, { merge: true });
+
+      const analysis = classifyTranscript(r.transcript || null);
+      const analysisRef = ref.collection("analysis").doc("latest");
+
+      batch.set(
+        analysisRef,
+        {
+          ...analysis,
+          createdAt: new Date(),
+        },
+        { merge: true }
+      );
     }
 
     await batch.commit();
