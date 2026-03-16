@@ -184,6 +184,36 @@ async function writeInChunks(rows: any[], chunkSize = 50) {
         },
         { merge: true }
       );
+
+      if (analysis.containsComplaint) {
+        const complaintRef = adminDb
+          .collection("restaurants")
+          .doc(String(r.assistantId || "unknown"))
+          .collection("reputationSignals")
+          .doc("voiceComplaints")
+          .collection("items")
+          .doc(String(r.id));
+
+        batch.set(
+          complaintRef,
+          {
+            source: "voice",
+            channel: "phone",
+            category: analysis.callType,
+            severity: "medium",
+            text: r.transcript || "",
+            customerName: "",
+            phone: r.from || "",
+            dateMs: r.startTime ? r.startTime.getTime() : Date.now(),
+            relatedOrderId: "",
+            tags: analysis.matchedPhrases,
+            restaurantCode: String(r.assistantId || "unknown"),
+            callId: String(r.id),
+            createdAtMs: Date.now(),
+          },
+          { merge: true }
+        );
+      }
     }
 
     await batch.commit();
