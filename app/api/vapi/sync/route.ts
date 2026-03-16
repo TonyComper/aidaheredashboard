@@ -18,10 +18,25 @@ function clip(value: any, max = 20000): string | null {
 }
 
 function getAdminRtdb() {
-  return admin.database(
+  const dbUrl =
     process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL ||
-      "https://askaida-dashboard-default-rtdb.firebaseio.com"
+    "https://askaida-dashboard-default-rtdb.firebaseio.com";
+
+  const existing = admin.apps.find((app) => app.name === "rtdb");
+
+  if (existing) {
+    return admin.database(existing);
+  }
+
+  const rtdbApp = admin.initializeApp(
+    {
+      credential: admin.app().options.credential,
+      databaseURL: dbUrl,
+    },
+    "rtdb"
   );
+
+  return admin.database(rtdbApp);
 }
 
 function toCallRow(x: AnyObj, assistantIdFallback: string) {
