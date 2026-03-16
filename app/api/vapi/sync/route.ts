@@ -3,8 +3,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebaseAdmin";
 import admin from "firebase-admin";
 
-const adminRtdb = admin.database();
-
 type AnyObj = Record<string, any>;
 
 function asDate(value: any): Date | null {
@@ -17,6 +15,13 @@ function clip(value: any, max = 20000): string | null {
   if (value == null) return null;
   const s = String(value);
   return s.length > max ? s.slice(0, max) : s;
+}
+
+function getAdminRtdb() {
+  return admin.database(
+    process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL ||
+      "https://askaida-dashboard-default-rtdb.firebaseio.com"
+  );
 }
 
 function toCallRow(x: AnyObj, assistantIdFallback: string) {
@@ -204,7 +209,7 @@ function classifyTranscript(transcript: string | null) {
 async function getRestaurantCodeForAssistant(assistantId: string | null) {
   if (!assistantId) return null;
 
-  const snap = await adminRtdb.ref(`restaurants`).get();
+  const snap = await getAdminRtdb().ref(`restaurants`).get();
   const restaurants = snap.val() || {};
 
   for (const [restaurantCode, data] of Object.entries(restaurants)) {
@@ -250,10 +255,9 @@ async function writeInChunks(rows: any[], chunkSize = 50) {
         );
 
         if (restaurantCode) {
-          await adminDb
-           await adminRtdb
-            .ref(`restaurants/${restaurantCode}/reputationSignals/voiceComplaints/items/${String(r.id)}`)
-            .update({
+              await getAdminRtdb()
+              .ref(`restaurants/${restaurantCode}/reputationSignals/voiceComplaints/items/${String(r.id)}`)
+              .update({
               source: "voice",
               channel: "phone",
               category: analysis.callType,
