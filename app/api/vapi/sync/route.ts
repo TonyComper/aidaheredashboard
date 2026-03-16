@@ -1,6 +1,9 @@
 // app/api/vapi/sync/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebaseAdmin";
+import admin from "firebase-admin";
+
+const adminRtdb = admin.database();
 
 type AnyObj = Record<string, any>;
 
@@ -201,7 +204,7 @@ function classifyTranscript(transcript: string | null) {
 async function getRestaurantCodeForAssistant(assistantId: string | null) {
   if (!assistantId) return null;
 
-  const snap = await adminDb.ref(`restaurants`).get();
+  const snap = await adminRtdb.ref(`restaurants`).get();
   const restaurants = snap.val() || {};
 
   for (const [restaurantCode, data] of Object.entries(restaurants)) {
@@ -248,6 +251,7 @@ async function writeInChunks(rows: any[], chunkSize = 50) {
 
         if (restaurantCode) {
           await adminDb
+           await adminRtdb
             .ref(`restaurants/${restaurantCode}/reputationSignals/voiceComplaints/items/${String(r.id)}`)
             .update({
               source: "voice",
