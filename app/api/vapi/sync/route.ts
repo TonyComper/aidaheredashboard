@@ -219,7 +219,7 @@ async function writeInChunks(rows: any[], chunkSize = 50) {
         { merge: true }
       );
 
-      if (false && analysis.containsComplaint) {
+      if (analysis.containsComplaint) {
         const complaintRef = adminDb
           .collection("restaurants")
           .doc(String(r.assistantId || "unknown"))
