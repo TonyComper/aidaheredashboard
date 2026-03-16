@@ -198,6 +198,22 @@ function classifyTranscript(transcript: string | null) {
   };
 }
 
+async function getRestaurantCodeForAssistant(assistantId: string | null) {
+  if (!assistantId) return null;
+
+  const snap = await adminDb.ref(`restaurants`).get();
+  const restaurants = snap.val() || {};
+
+  for (const [restaurantCode, data] of Object.entries(restaurants)) {
+    const cfg = (data as any)?.config || {};
+    if (cfg?.assistantId === assistantId) {
+      return String(restaurantCode);
+    }
+  }
+
+  return null;
+}
+
 async function writeInChunks(rows: any[], chunkSize = 50) {
   for (let i = 0; i < rows.length; i += chunkSize) {
     const chunk = rows.slice(i, i + chunkSize);
@@ -218,39 +234,40 @@ async function writeInChunks(rows: any[], chunkSize = 50) {
         },
         { merge: true }
       );
-
-      if (analysis.containsComplaint) {
-        const complaintRef = adminDb
-          .collection("restaurants")
-          .doc(String(r.assistantId || "unknown"))
-          .collection("reputationSignals")
-          .doc("voiceComplaints")
-          .collection("items")
-          .doc(String(r.id));
-
-        batch.set(
-          complaintRef,
-          {
-            source: "voice",
-            channel: "phone",
-            category: analysis.callType,
-            severity: "medium",
-            text: r.transcript || "",
-            customerName: "",
-            phone: r.from || "",
-            dateMs: r.startTime ? r.startTime.getTime() : Date.now(),
-            relatedOrderId: "",
-            tags: analysis.matchedPhrases,
-            restaurantCode: String(r.assistantId || "unknown"),
-            callId: String(r.id),
-            createdAtMs: Date.now(),
-          },
-          { merge: true }
-        );
-      }
     }
 
     await batch.commit();
+
+    for (const r of chunk) {
+      const analysis = classifyTranscript(r.transcript || null);
+
+      if (analysis.containsComplaint) {
+        const restaurantCode = await getRestaurantCodeForAssistant(
+          String(r.assistantId || "")
+        );
+
+        if (restaurantCode) {
+          await adminDb
+            .ref(`restaurants/${restaurantCode}/reputationSignals/voiceComplaints/items/${String(r.id)}`)
+            .update({
+              source: "voice",
+              channel: "phone",
+              category: analysis.callType,
+              severity: "medium",
+              text: r.transcript || "",
+              customerName: "",
+              phone: r.from || "",
+              dateMs: r.startTime ? r.startTime.getTime() : Date.now(),
+              relatedOrderId: "",
+              tags: analysis.matchedPhrases,
+              restaurantCode,
+              callId: String(r.id),
+              assistantId: String(r.assistantId || ""),
+              createdAtMs: Date.now(),
+            });
+        }
+      }
+    }
   }
 }
 
