@@ -1093,8 +1093,7 @@ export default function AssistantDashboardVapi({
               Restaurant Reputation — Phase 1
             </div>
             <div className="text-sm text-gray-500">
-              Narrative reputation summary for California Sandwiches Winston
-              Churchill
+                Narrative reputation summary for {restaurantPhase1?.restaurantDisplayName || "Restaurant"}
             </div>
           </div>
 
@@ -1181,14 +1180,13 @@ export default function AssistantDashboardVapi({
           )}
         </div>
       ) : view === "restaurantPhase2" ? (
-        <div className="rounded-2xl bg-white/95 backdrop-blur shadow-sm border border-slate-200 p-5 space-y-6">
+        <div className="rounded-2xl bg-yellow-50 backdrop-blur shadow-sm border border-yellow-200 p-5 space-y-6">
           <div>
-            <div className="font-medium text-lg">
+            <div className="font-medium text-lg text-yellow-900">
               Restaurant Reputation — Phase 2
             </div>
             <div className="text-sm text-gray-500">
-              Trend and theme analysis for California Sandwiches Winston
-              Churchill
+              Trend and theme analysis for {restaurantPhase2?.restaurantDisplayName || "Restaurant"}
             </div>
           </div>
 

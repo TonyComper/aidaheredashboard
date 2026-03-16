@@ -3659,6 +3659,10 @@ async function runRestaurantReputationRefresh({
     restaurantTimeZone,
   });
 
+  if (phase2Report && typeof phase2Report === "object") {
+    phase2Report.complaintTrends = complaintTrends;
+  }
+
   const nowKey = dayKeyFromMs(Date.now(), restaurantTimeZone);
 
   await db.ref(`restaurants/${restaurantCode}/insights/reputationPhase2/latest`).set(phase2Report);
@@ -3674,9 +3678,6 @@ async function runRestaurantReputationRefresh({
     ...complaintTrends,
     snapshotDayKey: nowKey,
   });
-    if (phase2Report && typeof phase2Report === "object") {
-    phase2Report.complaintTrends = complaintTrends;
-  }
 
   return {
     ok: true,
