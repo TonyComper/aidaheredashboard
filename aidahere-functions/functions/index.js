@@ -3159,9 +3159,8 @@ exports.getRestaurantReputationPhase2 = onRequest({ region: "us-central1" }, asy
 /* --------------------------- Scheduled: buildReputationPhase2AllRestaurants --------------------------- */
 /**
  * Nightly job:
- * - sync SerpAPI reviews (last 30 days text only) for each active restaurant config
- * - rebuild Restaurant Phase 1
- * - rebuild Restaurant Phase 2 and write latest + history snapshot
+ * - runs full restaurant reputation refresh for each active restaurant
+ * - reuses the same logic as refreshRestaurantReputation
  */
 exports.buildReputationPhase2AllRestaurants = onSchedule(
   {
@@ -3186,113 +3185,15 @@ exports.buildReputationPhase2AllRestaurants = onSchedule(
       try {
         const cfgSnap = await db.ref(`restaurants/${restaurantCode}/config/reputation`).get();
         const cfg = cfgSnap.val() || {};
-        if (!cfg?.googlePlaceId || cfg.active === false) continue;
 
-        const restaurantDisplayName = safeTrim(cfg.restaurantDisplayName || "");
-        const restaurantTimeZone =
-          safeTrim(cfg.timeZone || "") ||
-          (await db.ref(`restaurants/${restaurantCode}/config/timeZone`).get()).val() ||
-          "America/Toronto";
+        if (!cfg?.googlePlaceId) continue;
+        if (cfg.active === false) continue;
 
-        const serpDataId = safeTrim(cfg.serpDataId || "");
-        const placeId = safeTrim(cfg.googlePlaceId || "");
-        const hl = "en";
-        const maxPages = 8;
-
-        const basePath = `restaurants/${restaurantCode}/reputation/serpapi`;
-        await db.ref(`${basePath}/reviews`).set(null);
-
-        const nowMs = Date.now();
-        const cutoffMs = nowMs - 30 * 24 * 60 * 60 * 1000;
-
-        const { reviews } = await fetchSerpApiReviews({
-          apiKey: apiKeySerp,
-          dataId: serpDataId,
-          placeId,
-          hl,
-          maxPages,
-        });
-
-        const updates = {};
-        for (const r of reviews) {
-          const iso = r?.iso_date || r?.iso_date_of_last_edit || "";
-          const dateMs = toMsFromIso(iso);
-          if (!dateMs || dateMs < cutoffMs) continue;
-
-          const text = (r?.text || r?.snippet || r?.extracted_snippet?.original || "")
-            .toString()
-            .trim();
-          if (!text) continue;
-
-          const reviewId = sanitizeDbKey(
-            r?.review_id || `serp_${r?.user?.name || "anon"}_${iso || Date.now()}`
-          );
-
-          updates[`${basePath}/reviews/${reviewId}`] = {
-            reviewId,
-            source: safeTrim(r?.source || "Google"),
-            rating: typeof r?.rating === "number" ? r.rating : null,
-            dateMs,
-            isoDate: safeTrim(iso),
-            authorName: safeTrim(r?.user?.name || ""),
-            authorLink: safeTrim(r?.user?.link || ""),
-            snippet: safeTrim(r?.snippet || ""),
-            text,
-            language: hl,
-            likes: typeof r?.likes === "number" ? r.likes : 0,
-            hasResponse: !!r?.response,
-            responseText: safeTrim(
-              r?.response?.extracted_snippet?.original || r?.response?.snippet || ""
-            ),
-            fetchedAtMs: nowMs,
-          };
-        }
-
-        if (Object.keys(updates).length > 0) {
-          await db.ref().update(updates);
-        }
-
-        await db.ref(`${basePath}/meta`).set({
-          ok: true,
+        await runRestaurantReputationRefresh({
           restaurantCode,
-          placeId,
-          serpDataId,
-          hl,
-          maxPages,
-          fetchedAtMs: nowMs,
-          cutoffMs,
-          cutoffIso: new Date(cutoffMs).toISOString(),
-          note: "Nightly scheduled sync for Restaurant Phase 1 + Phase 2",
+          apiKeySerp,
+          apiKeyOpenAI,
         });
-
-        const reviewsSnap = await db.ref(`${basePath}/reviews`).get();
-        const reviewsObj = reviewsSnap.val() || {};
-        const reviewsArr = Object.values(reviewsObj);
-
-        const phase1Report = await buildRestaurantReputationPhase1Report({
-          restaurantCode,
-          restaurantDisplayName,
-          reviews: reviewsArr,
-          apiKey: apiKeyOpenAI,
-        });
-
-        await db.ref(`restaurants/${restaurantCode}/insights/reputationPhase1`).set(phase1Report);
-
-        const phase2Report = await buildRestaurantReputationPhase2Report({
-          restaurantCode,
-          restaurantDisplayName,
-          reviews: reviewsArr,
-          apiKey: apiKeyOpenAI,
-          restaurantTimeZone,
-        });
-
-        const nowKey = dayKeyFromMs(Date.now(), restaurantTimeZone);
-
-        const latestPath = `restaurants/${restaurantCode}/insights/reputationPhase2/latest`;
-        const histPath = `restaurants/${restaurantCode}/insights/reputationPhase2/history/${sanitizeDbKey(nowKey)}`;
-
-        await db.ref(latestPath).set(phase2Report);
-        await db.ref(histPath).set({ ...phase2Report, snapshotDayKey: nowKey });
       } catch (e) {
         console.error(
           "buildReputationPhase2AllRestaurants error:",
@@ -3309,7 +3210,9 @@ exports.buildReputationPhase2AllRestaurants = onSchedule(
 exports.setRestaurantReputationFields = onRequest({ region: "us-central1" }, async (req, res) => {
   setCors(res);
   if (req.method === "OPTIONS") return res.status(204).send("");
-  if (req.method !== "POST") return res.status(405).json({ ok: false, error: "POST only" });
+  if (req.method !== "POST") {
+    return res.status(405).json({ ok: false, error: "POST only" });
+  }
 
   try {
     const {
@@ -3337,8 +3240,9 @@ exports.setRestaurantReputationFields = onRequest({ region: "us-central1" }, asy
     if (serpDataId !== undefined) updates.serpDataId = safeTrim(serpDataId);
     if (serpDataCid !== undefined) updates.serpDataCid = safeTrim(serpDataCid);
     if (serpSearchQuery !== undefined) updates.serpSearchQuery = safeTrim(serpSearchQuery);
-    if (restaurantDisplayName !== undefined)
+    if (restaurantDisplayName !== undefined) {
       updates.restaurantDisplayName = safeTrim(restaurantDisplayName);
+    }
     if (timeZone !== undefined) updates.timeZone = safeTrim(timeZone);
     if (active !== undefined) updates.active = active !== false;
 
@@ -3356,6 +3260,190 @@ exports.setRestaurantReputationFields = onRequest({ region: "us-central1" }, asy
   }
 });
 
+/* --------------------------- Restaurant Reputation Refresh Helper --------------------------- */
+
+async function runRestaurantReputationRefresh({
+  restaurantCode,
+  apiKeySerp,
+  apiKeyOpenAI,
+}) {
+  const cfgSnap = await db.ref(`restaurants/${restaurantCode}/config/reputation`).get();
+  const cfg = cfgSnap.val() || {};
+
+  if (!cfg?.googlePlaceId) {
+    throw new Error("googlePlaceId not configured");
+  }
+
+  const restaurantDisplayName = safeTrim(cfg.restaurantDisplayName || "");
+
+  const restaurantTimeZone =
+    safeTrim(cfg.timeZone || "") ||
+    (await db.ref(`restaurants/${restaurantCode}/config/timeZone`).get()).val() ||
+    "America/Toronto";
+
+  const serpDataId = safeTrim(cfg.serpDataId || "");
+  const placeId = safeTrim(cfg.googlePlaceId || "");
+  const basePath = `restaurants/${restaurantCode}/reputation/serpapi`;
+
+  const nowMs = Date.now();
+  const cutoffMs = nowMs - 90 * 24 * 60 * 60 * 1000;
+
+  const newestResp = await fetchSerpApiReviews({
+    apiKey: apiKeySerp,
+    dataId: serpDataId,
+    placeId,
+    hl: "en",
+    maxPages: 25,
+    sortBy: "newestFirst",
+  });
+
+  const highestResp = await fetchSerpApiReviews({
+    apiKey: apiKeySerp,
+    dataId: serpDataId,
+    placeId,
+    hl: "en",
+    maxPages: 25,
+    sortBy: "highestRating",
+  });
+
+  const lowestResp = await fetchSerpApiReviews({
+    apiKey: apiKeySerp,
+    dataId: serpDataId,
+    placeId,
+    hl: "en",
+    maxPages: 25,
+    sortBy: "lowestRating",
+  });
+
+  const reviews = [
+    ...(Array.isArray(newestResp?.reviews) ? newestResp.reviews : []),
+    ...(Array.isArray(highestResp?.reviews) ? highestResp.reviews : []),
+    ...(Array.isArray(lowestResp?.reviews) ? lowestResp.reviews : []),
+  ];
+
+  const uniqueReviews = Object.values(
+    reviews.reduce((acc, r) => {
+      const key = r?.review_id || r?.reviewId || null;
+      if (key) acc[key] = r;
+      return acc;
+    }, {})
+  );
+
+  const placeSignals = await fetchSerpApiPlaceSignals({
+    apiKey: apiKeySerp,
+    dataId: serpDataId,
+    placeId,
+    hl: "en",
+  });
+
+  console.log("placeSignals", JSON.stringify(placeSignals, null, 2));
+
+  const updates = {};
+
+  for (const r of uniqueReviews) {
+    const iso = r?.iso_date || r?.iso_date_of_last_edit || "";
+    const dateMs = toMsFromIso(iso);
+
+    if (!dateMs || dateMs < cutoffMs) continue;
+
+    const text =
+      (r?.text || r?.snippet || r?.extracted_snippet?.original || "")
+        .toString()
+        .trim();
+
+    if (!text) continue;
+
+    const reviewId = sanitizeDbKey(
+      r?.review_id || `serp_${r?.user?.name || "anon"}_${iso || Date.now()}`
+    );
+
+    updates[`${basePath}/reviews/${reviewId}`] = {
+      reviewId,
+      source: safeTrim(r?.source || "Google"),
+      rating: typeof r?.rating === "number" ? r.rating : null,
+      dateMs,
+      isoDate: safeTrim(iso),
+      authorName: safeTrim(r?.user?.name || ""),
+      authorLink: safeTrim(r?.user?.link || ""),
+      snippet: safeTrim(r?.snippet || ""),
+      text,
+      language: "en",
+      likes: typeof r?.likes === "number" ? r.likes : 0,
+      hasResponse: !!r?.response,
+      responseText: safeTrim(
+        r?.response?.extracted_snippet?.original ||
+          r?.response?.snippet ||
+          ""
+      ),
+      fetchedAtMs: nowMs,
+    };
+  }
+
+  const storedReviews = Object.keys(updates).length;
+
+  await db.ref(`${basePath}/reviews`).set(null);
+
+  if (Object.keys(updates).length > 0) {
+    await db.ref().update(updates);
+  }
+
+  await db.ref(`${basePath}/meta`).update({
+    ok: true,
+    restaurantCode,
+    placeId,
+    serpDataId,
+    hl: "en",
+    maxPages: 25,
+    fetchedAtMs: nowMs,
+    cutoffMs,
+    cutoffIso: new Date(cutoffMs).toISOString(),
+    storedReviews,
+    googleTotalRatings: placeSignals?.userRatingsTotal || null,
+    googleRating: placeSignals?.rating || null,
+    note: "Restaurant reputation refresh (manual or scheduled)",
+  });
+
+  const reviewsSnap = await db.ref(`${basePath}/reviews`).get();
+  const reviewsObj = reviewsSnap.val() || {};
+  const reviewsArr = Object.values(reviewsObj);
+
+  const phase1Report = await buildRestaurantReputationPhase1Report({
+    restaurantCode,
+    restaurantDisplayName,
+    reviews: reviewsArr,
+    apiKey: apiKeyOpenAI,
+  });
+
+  await db.ref(`restaurants/${restaurantCode}/insights/reputationPhase1`).set(phase1Report);
+
+  const phase2Report = await buildRestaurantReputationPhase2Report({
+    restaurantCode,
+    restaurantDisplayName,
+    reviews: reviewsArr,
+    apiKey: apiKeyOpenAI,
+    restaurantTimeZone,
+  });
+
+  const nowKey = dayKeyFromMs(Date.now(), restaurantTimeZone);
+
+  await db.ref(`restaurants/${restaurantCode}/insights/reputationPhase2/latest`).set(phase2Report);
+
+  await db.ref(
+    `restaurants/${restaurantCode}/insights/reputationPhase2/history/${sanitizeDbKey(nowKey)}`
+  ).set({
+    ...phase2Report,
+    snapshotDayKey: nowKey,
+  });
+
+  return {
+    ok: true,
+    restaurantCode,
+    totalReviews: reviewsArr.length,
+    storedReviews,
+    risingThemes: phase2Report?.trend?.risingThemes?.length || 0,
+  };
+}
+
 /* --------------------------- HTTPS: refreshRestaurantReputation --------------------------- */
 /**
  * Single endpoint for dashboard refresh
@@ -3364,9 +3452,13 @@ exports.setRestaurantReputationFields = onRequest({ region: "us-central1" }, asy
  * 2) Build Phase 1
  * 3) Build Phase 2
  */
-
 exports.refreshRestaurantReputation = onRequest(
-  { region: "us-central1", secrets: [SERPAPI_API_KEY, OPENAI_API_KEY], timeoutSeconds: 300, memory: "1GiB" },
+  {
+    region: "us-central1",
+    secrets: [SERPAPI_API_KEY, OPENAI_API_KEY],
+    timeoutSeconds: 300,
+    memory: "1GiB",
+  },
   async (req, res) => {
     setCors(res);
     if (req.method === "OPTIONS") return res.status(204).send("");
@@ -3383,184 +3475,16 @@ exports.refreshRestaurantReputation = onRequest(
         return res.status(400).json({ ok: false, error: "restaurantCode required" });
       }
 
-      const cfgSnap = await db.ref(`restaurants/${restaurantCode}/config/reputation`).get();
-      const cfg = cfgSnap.val() || {};
-
-      if (!cfg?.googlePlaceId) {
-        return res.status(400).json({ ok: false, error: "googlePlaceId not configured" });
-      }
-
-      const restaurantDisplayName = safeTrim(cfg.restaurantDisplayName || "");
-
-      const restaurantTimeZone =
-        safeTrim(cfg.timeZone || "") ||
-        (await db.ref(`restaurants/${restaurantCode}/config/timeZone`).get()).val() ||
-        "America/Toronto";
-
       const apiKeySerp = SERPAPI_API_KEY.value();
       const apiKeyOpenAI = OPENAI_API_KEY.value();
 
-      const serpDataId = safeTrim(cfg.serpDataId || "");
-      const placeId = safeTrim(cfg.googlePlaceId || "");
-
-      const basePath = `restaurants/${restaurantCode}/reputation/serpapi`;
-
-      const nowMs = Date.now();
-      const cutoffMs = nowMs - 90 * 24 * 60 * 60 * 1000;
-
-const newestResp = await fetchSerpApiReviews({
-  apiKey: apiKeySerp,
-  dataId: serpDataId,
-  placeId,
-  hl: "en",
-  maxPages: 25,
-  sortBy: "newestFirst",
-});
-
-const highestResp = await fetchSerpApiReviews({
-  apiKey: apiKeySerp,
-  dataId: serpDataId,
-  placeId,
-  hl: "en",
-  maxPages: 25,
-  sortBy: "highestRating",
-});
-
-const lowestResp = await fetchSerpApiReviews({
-  apiKey: apiKeySerp,
-  dataId: serpDataId,
-  placeId,
-  hl: "en",
-  maxPages: 25,
-  sortBy: "lowestRating",
-});
-
-const reviews = [
-  ...(Array.isArray(newestResp?.reviews) ? newestResp.reviews : []),
-  ...(Array.isArray(highestResp?.reviews) ? highestResp.reviews : []),
-  ...(Array.isArray(lowestResp?.reviews) ? lowestResp.reviews : []),
-];
-
-const uniqueReviews = Object.values(
-  reviews.reduce((acc, r) => {
-    const key = r?.review_id || r?.reviewId || null;
-    if (key) acc[key] = r;
-    return acc;
-  }, {})
-);
-
-
-const placeSignals = await fetchSerpApiPlaceSignals({
-  apiKey: apiKeySerp,
-  dataId: serpDataId,
-  placeId,
-  hl: "en",
-});
-
-console.log("placeSignals", JSON.stringify(placeSignals, null, 2));
-
-const updates = {};
-
-for (const r of uniqueReviews) {
-  const iso = r?.iso_date || r?.iso_date_of_last_edit || "";
-  const dateMs = toMsFromIso(iso);
-
-  if (!dateMs || dateMs < cutoffMs) continue;
-
-  const text =
-    (r?.text || r?.snippet || r?.extracted_snippet?.original || "")
-      .toString()
-      .trim();
-
-  if (!text) continue;
-
-  const reviewId = sanitizeDbKey(
-    r?.review_id || `serp_${r?.user?.name || "anon"}_${iso || Date.now()}`
-  );
-
-  updates[`${basePath}/reviews/${reviewId}`] = {
-    reviewId,
-    source: safeTrim(r?.source || "Google"),
-    rating: typeof r?.rating === "number" ? r.rating : null,
-    dateMs,
-    isoDate: safeTrim(iso),
-    authorName: safeTrim(r?.user?.name || ""),
-    authorLink: safeTrim(r?.user?.link || ""),
-    snippet: safeTrim(r?.snippet || ""),
-    text,
-    language: "en",
-    likes: typeof r?.likes === "number" ? r.likes : 0,
-    hasResponse: !!r?.response,
-    responseText: safeTrim(
-      r?.response?.extracted_snippet?.original ||
-        r?.response?.snippet ||
-        ""
-    ),
-    fetchedAtMs: nowMs,
-  };
-}
-      const storedReviews = Object.keys(updates).length;
-      
-      if (Object.keys(updates).length > 0) {
-        await db.ref().update(updates);
-      }
-
-      await db.ref(`${basePath}/meta`).update({
-      ok: true,
-      restaurantCode,
-      placeId,
-      serpDataId,
-      hl: "en",
-      maxPages: 25,
-      fetchedAtMs: nowMs,
-      cutoffMs,
-      cutoffIso: new Date(cutoffMs).toISOString(),
-      storedReviews,
-      googleTotalRatings: placeSignals?.userRatingsTotal || null,
-      googleRating: placeSignals?.rating || null,
-      note: "Manual refresh for Restaurant Phase 1 + Phase 2",
-    });
-
-      const reviewsSnap = await db.ref(`${basePath}/reviews`).get();
-      const reviewsObj = reviewsSnap.val() || {};
-      const reviewsArr = Object.values(reviewsObj);
-
-      const phase1Report = await buildRestaurantReputationPhase1Report({
+      const result = await runRestaurantReputationRefresh({
         restaurantCode,
-        restaurantDisplayName,
-        reviews: reviewsArr,
-        apiKey: apiKeyOpenAI,
+        apiKeySerp,
+        apiKeyOpenAI,
       });
 
-      await db.ref(`restaurants/${restaurantCode}/insights/reputationPhase1`).set(phase1Report);
-
-      const phase2Report = await buildRestaurantReputationPhase2Report({
-        restaurantCode,
-        restaurantDisplayName,
-        reviews: reviewsArr,
-        apiKey: apiKeyOpenAI,
-        restaurantTimeZone,
-      });
-
-      const nowKey = dayKeyFromMs(Date.now(), restaurantTimeZone);
-
-      await db.ref(`restaurants/${restaurantCode}/insights/reputationPhase2/latest`).set(phase2Report);
-
-      await db.ref(
-        `restaurants/${restaurantCode}/insights/reputationPhase2/history/${sanitizeDbKey(nowKey)}`
-      ).set({
-        ...phase2Report,
-        snapshotDayKey: nowKey,
-      });
-
-return res.json({
-  ok: true,
-  restaurantCode,
-  totalReviews: reviewsArr.length,
-  storedReviews,
-  risingThemes: phase2Report?.trend?.risingThemes?.length || 0,
-});
-
+      return res.json(result);
     } catch (err) {
       console.error("refreshRestaurantReputation error:", err);
       return res.status(500).json({ ok: false, error: String(err?.message || err) });
