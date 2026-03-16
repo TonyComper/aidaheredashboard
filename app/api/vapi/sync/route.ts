@@ -22,7 +22,7 @@ function getAdminRtdb() {
     process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL ||
     "https://askaida-dashboard-default-rtdb.firebaseio.com";
 
-  const existing = admin.apps.find((app) => app.name === "rtdb");
+ const existing = admin.apps.find((app: any) => app && app.name === "rtdb");
 
   if (existing) {
     return admin.database(existing);
