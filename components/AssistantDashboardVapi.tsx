@@ -192,8 +192,18 @@ function parsePlanStartMonth(input?: string | null): Date | null {
   const m1 = cleaned.match(/^([A-Za-z]+)\s+(\d{4})$/);
   if (m1) {
     const months = [
-      "january","february","march","april","may","june",
-      "july","august","september","october","november","december"
+      "january",
+      "february",
+      "march",
+      "april",
+      "may",
+      "june",
+      "july",
+      "august",
+      "september",
+      "october",
+      "november",
+      "december",
     ];
     const idx = months.indexOf(m1[1].toLowerCase());
     const year = parseInt(m1[2], 10);
@@ -206,19 +216,32 @@ function parsePlanStartMonth(input?: string | null): Date | null {
   if (m) {
     const year = parseInt(m[1], 10);
     const month = parseInt(m[2], 10) - 1;
-    if (month >= 0 && month < 12) return new Date(year, month, 1, 0, 0, 0, 0);
+    if (month >= 0 && month < 12) {
+      return new Date(year, month, 1, 0, 0, 0, 0);
+    }
   }
 
   m = cleaned.match(/^(\d{1,2})[-/](\d{4})$/);
   if (m) {
     const month = parseInt(m[1], 10) - 1;
     const year = parseInt(m[2], 10);
-    if (month >= 0 && month < 12) return new Date(year, month, 1, 0, 0, 0, 0);
+    if (month >= 0 && month < 12) {
+      return new Date(year, month, 1, 0, 0, 0, 0);
+    }
   }
 
   const fallback = new Date(cleaned);
-  if (!isNaN(fallback.getTime()))
-    return new Date(fallback.getFullYear(), fallback.getMonth(), 1, 0, 0, 0, 0);
+  if (!isNaN(fallback.getTime())) {
+    return new Date(
+      fallback.getFullYear(),
+      fallback.getMonth(),
+      1,
+      0,
+      0,
+      0,
+      0
+    );
+  }
 
   return null;
 }
@@ -234,15 +257,15 @@ function KpiCard({
 }) {
   return (
     <div className="rounded-2xl bg-white shadow-sm border border-slate-200 p-6">
-<div className="text-slate-500 text-sm font-medium tracking-wide uppercase">
-  {title}
-</div>
-<div className="text-3xl md:text-4xl font-semibold text-slate-900 mt-2 break-words">
-  {value}
-</div>
-{subtitle && (
-  <div className="text-xs text-slate-400 mt-2">{subtitle}</div>
-)}
+      <div className="text-slate-500 text-sm font-medium tracking-wide uppercase">
+        {title}
+      </div>
+      <div className="text-3xl md:text-4xl font-semibold text-slate-900 mt-2 break-words">
+        {value}
+      </div>
+      {subtitle && (
+        <div className="text-xs text-slate-400 mt-2">{subtitle}</div>
+      )}
     </div>
   );
 }
@@ -283,6 +306,7 @@ export default function AssistantDashboardVapi({
 
   // View switch (+ Billing + Invoice)
   const [view, setView] = useState<ViewMode>("billing");
+
   // Sync state
   const [syncing, setSyncing] = useState<boolean>(false);
 
@@ -292,31 +316,38 @@ export default function AssistantDashboardVapi({
   const [planName, setPlanName] = useState<string>("-");
   const [planMonthlyCalls, setPlanMonthlyCalls] = useState<number>(0);
   const [planMonthlyFee, setPlanMonthlyFee] = useState<number>(0);
-  const [planStartMonth, setPlanStartMonth] = useState<string | null>(null); // for header display
+  const [planStartMonth, setPlanStartMonth] = useState<string | null>(null);
   const [planOverageFee, setPlanOverageFee] = useState<number>(0);
   const [callsThisMonth, setCallsThisMonth] = useState<number>(0);
 
   // INVOICE HISTORY
   type InvoiceRow = {
-    month: string; // e.g., "August 2025"
+    month: string;
     planName: string;
     planMonthlyFee: number;
     planMonthlyCalls: number;
     actualCalls: number;
-    callBalance: number; // remaining (can be negative)
+    callBalance: number;
     callOverageFee: number;
-    calculatedOverage: number; // $
-    totalInvoice: number; // monthly fee + overage
+    calculatedOverage: number;
+    totalInvoice: number;
   };
+
   const [invoiceLoading, setInvoiceLoading] = useState<boolean>(false);
   const [invoiceError, setInvoiceError] = useState<string | null>(null);
   const [invoiceRows, setInvoiceRows] = useState<InvoiceRow[]>([]);
+
   const authCtx = useAuth() as any;
-  const [restaurantRepLoading, setRestaurantRepLoading] = useState<boolean>(false);
-  const [restaurantRepError, setRestaurantRepError] = useState<string | null>(null);
+  const [restaurantRepLoading, setRestaurantRepLoading] =
+    useState<boolean>(false);
+  const [restaurantRepError, setRestaurantRepError] = useState<string | null>(
+    null
+  );
   const [restaurantPhase1, setRestaurantPhase1] = useState<any>(null);
   const [restaurantPhase2, setRestaurantPhase2] = useState<any>(null);
   const [restaurantMeta, setRestaurantMeta] = useState<any>(null);
+  const [restaurantComplaintTrends, setRestaurantComplaintTrends] =
+    useState<any>(null);
 
   // Resolve the date range (local time)
   const { start, end } = useMemo(() => {
@@ -342,7 +373,6 @@ export default function AssistantDashboardVapi({
       void loadData();
       void loadBillingUsage();
 
-      // Ensure plan is fresh; then (if needed) rebuild invoice with fresh plan
       const fresh = await loadBillingPlan();
       if (view === "invoice") {
         await loadInvoiceHistory(fresh ?? undefined);
@@ -356,10 +386,9 @@ export default function AssistantDashboardVapi({
     if (!assistantId) return;
     if (!didAutoSyncRef.current) {
       didAutoSyncRef.current = true;
-      // Fire-and-forget; UI shows Syncing… indicator
       void syncNow();
     }
-  }, [assistantId]); // runs when dashboard mounts and when assistantId changes
+  }, [assistantId]);
 
   // -------- DATA (call logs) ----------
   async function loadData() {
@@ -407,8 +436,7 @@ export default function AssistantDashboardVapi({
 
   useEffect(() => {
     void loadData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [assistantId, start.getTime(), end.getTime()]);
+  }, [assistantId, pageSize, start.getTime(), end.getTime()]);
 
   // -------- BILLING (plan + usage) ----------
   async function loadBillingPlan(): Promise<{
@@ -416,15 +444,14 @@ export default function AssistantDashboardVapi({
     planMonthlyCalls: number;
     planMonthlyFee: number;
     planOverageFee: number;
-    planStartMonth: string | null; // label for header
-    planStartDate: Date | null; // normalized first-of-month Date for logic
+    planStartMonth: string | null;
+    planStartDate: Date | null;
   } | null> {
     setPlanLoading(true);
     setPlanError(null);
     try {
       const db = getFirestore(firebaseApp);
 
-      // Find the user document by assistantId
       const usersQ = query(
         collection(db, "users"),
         where("assistantId", "==", assistantId),
@@ -436,9 +463,9 @@ export default function AssistantDashboardVapi({
         setPlanLoading(false);
         return null;
       }
+
       const u = usersSnap.docs[0].data() as Record<string, any>;
 
-      // Support both labeled and camelCase fields
       const _planName = String(u["Plan Name"] ?? u.planName ?? "—");
       const _planMonthlyCalls =
         typeof u["Plan Monthly Calls"] === "number"
@@ -459,9 +486,6 @@ export default function AssistantDashboardVapi({
           ? (u.planOverageFee as number)
           : 0;
 
-      // --- Plan Start Month: prefer Timestamp/epoch, fallback to string ---
-      // Accept: "Plan Start Month" (Timestamp or string), planStartMonthTs (Timestamp),
-      //         planStartMonthMs (number epoch), planStartMonth (string)
       const rawStart =
         u["Plan Start Month"] ??
         u.planStartMonthTs ??
@@ -472,19 +496,18 @@ export default function AssistantDashboardVapi({
       let _planStartMonthLabel: string | null = null;
 
       if (rawStart && typeof rawStart?.toDate === "function") {
-        // Firestore Timestamp
         _planStartDate = rawStart.toDate();
       } else if (typeof rawStart === "number" && isFinite(rawStart)) {
-        // epoch ms
         _planStartDate = new Date(rawStart);
       } else if (typeof rawStart === "string") {
-        // legacy string
         const parsed = parsePlanStartMonth(rawStart);
-        if (parsed) _planStartDate = parsed;
-        else _planStartMonthLabel = rawStart; // at least show in header
+        if (parsed) {
+          _planStartDate = parsed;
+        } else {
+          _planStartMonthLabel = rawStart;
+        }
       }
 
-      // Normalize to first day of month (local)
       if (_planStartDate) {
         _planStartDate = new Date(
           _planStartDate.getFullYear(),
@@ -501,14 +524,12 @@ export default function AssistantDashboardVapi({
         });
       }
 
-      // Update header state
       setPlanName(_planName);
       setPlanMonthlyCalls(_planMonthlyCalls);
       setPlanMonthlyFee(_planMonthlyFee);
       setPlanOverageFee(_planOverageFee);
       setPlanStartMonth(_planStartMonthLabel);
 
-      // Return fresh values to callers (used by invoice loader)
       return {
         planName: _planName,
         planMonthlyCalls: _planMonthlyCalls,
@@ -551,7 +572,6 @@ export default function AssistantDashboardVapi({
   useEffect(() => {
     void loadBillingPlan();
     void loadBillingUsage();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [assistantId]);
 
   // KPI totals for log/hourly
@@ -592,8 +612,8 @@ export default function AssistantDashboardVapi({
       }),
     []
   );
-  const callBalance = planMonthlyCalls - callsThisMonth; // positive => remaining
-  const overageCount = Math.max(0, -callBalance); // how many calls above plan
+  const callBalance = planMonthlyCalls - callsThisMonth;
+  const overageCount = Math.max(0, -callBalance);
   const overageAmount = overageCount * planOverageFee;
 
   // -------- Invoice History Loader --------
@@ -602,10 +622,9 @@ export default function AssistantDashboardVapi({
     planMonthlyCalls?: number;
     planMonthlyFee?: number;
     planOverageFee?: number;
-    planStartMonth?: string | null; // unused for logic, display only
-    planStartDate?: Date | null; // preferred source for logic
+    planStartMonth?: string | null;
+    planStartDate?: Date | null;
   }) {
-    // Only block on planLoading if we DON'T have an override
     if (!override && (planLoading || planError)) return;
 
     setInvoiceLoading(true);
@@ -619,7 +638,6 @@ export default function AssistantDashboardVapi({
       const pFee = override?.planMonthlyFee ?? planMonthlyFee;
       const pOver = override?.planOverageFee ?? planOverageFee;
 
-      // Prefer Timestamp-resolved Date if provided; fallback to parsing legacy header label
       const pStartDate = override?.planStartDate ?? null;
 
       const parsedStart =
@@ -664,9 +682,7 @@ export default function AssistantDashboardVapi({
         });
       }
 
-      // ✅ Newest month first (current month at top)
       rows.reverse();
-
       setInvoiceRows(rows);
     } catch (e) {
       setInvoiceError(
@@ -677,87 +693,90 @@ export default function AssistantDashboardVapi({
     }
   }
 
-async function loadRestaurantReputation() {
-  setRestaurantRepLoading(true);
-  setRestaurantRepError(null);
+  async function loadRestaurantReputation() {
+    setRestaurantRepLoading(true);
+    setRestaurantRepError(null);
+    setRestaurantPhase1(null);
+    setRestaurantPhase2(null);
+    setRestaurantComplaintTrends(null);
 
-  try {
-    const restaurantCode = authCtx?.profile?.restaurantCode || null;
+    try {
+      const restaurantCode = authCtx?.profile?.restaurantCode || null;
 
-    if (!restaurantCode) return;
+      if (!restaurantCode) return;
 
-    const [phase1Res, phase2Res] = await Promise.all([
-      fetch(
-        `https://us-central1-askaida-dashboard.cloudfunctions.net/getRestaurantReputationPhase1?restaurantCode=${restaurantCode}`
-      ),
-      fetch(
-        `https://us-central1-askaida-dashboard.cloudfunctions.net/getRestaurantReputationPhase2?restaurantCode=${restaurantCode}`
-      ),
-    ]);
+      const [phase1Res, phase2Res] = await Promise.all([
+        fetch(
+          `https://us-central1-askaida-dashboard.cloudfunctions.net/getRestaurantReputationPhase1?restaurantCode=${restaurantCode}`
+        ),
+        fetch(
+          `https://us-central1-askaida-dashboard.cloudfunctions.net/getRestaurantReputationPhase2?restaurantCode=${restaurantCode}`
+        ),
+      ]);
 
-    const phase1Json = await phase1Res.json().catch(() => null);
-    const phase2Json = await phase2Res.json().catch(() => null);
+      const phase1Json = await phase1Res.json().catch(() => null);
+      const phase2Json = await phase2Res.json().catch(() => null);
 
-    if (!phase1Res.ok && !phase2Res.ok) {
-      throw new Error("Failed to load restaurant reputation data.");
+      if (!phase1Res.ok && !phase2Res.ok) {
+        throw new Error("Failed to load restaurant reputation data.");
+      }
+
+      setRestaurantPhase1(phase1Json?.data || null);
+      setRestaurantPhase2(phase2Json?.data || null);
+
+      setRestaurantMeta({
+        storedReviews:
+          phase2Json?.data?.ops?.storedReviews ??
+          phase1Json?.data?.ops?.storedReviews ??
+          null,
+        totalTextReviews:
+          phase2Json?.data?.counts?.totalTextReviews ??
+          phase1Json?.data?.counts?.totalTextReviews ??
+          null,
+      });
+
+      setRestaurantComplaintTrends(phase2Json?.data?.complaintTrends || null);
+    } catch (e) {
+      setRestaurantRepError(
+        e instanceof Error ? e.message : "Failed to load restaurant reputation."
+      );
+    } finally {
+      setRestaurantRepLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (view === "invoice") {
+      (async () => {
+        const fresh = await loadBillingPlan();
+        await loadInvoiceHistory(fresh ?? undefined);
+      })();
     }
 
-    setRestaurantPhase1(phase1Json?.data || null);
-    setRestaurantPhase2(phase2Json?.data || null);
+    if (view === "restaurantPhase1" || view === "restaurantPhase2") {
+      void loadRestaurantReputation();
+    }
+  }, [view, assistantId]);
 
-    // optional lightweight meta from phase 2 ops/counts if available now
-    setRestaurantMeta({
-      storedReviews:
-        phase2Json?.data?.ops?.storedReviews ??
-        phase1Json?.data?.ops?.storedReviews ??
-        null,
-      totalTextReviews:
-        phase2Json?.data?.counts?.totalTextReviews ??
-        phase1Json?.data?.counts?.totalTextReviews ??
-        null,
-    });
-  } catch (e) {
-    setRestaurantRepError(
-      e instanceof Error ? e.message : "Failed to load restaurant reputation."
-    );
-  } finally {
-    setRestaurantRepLoading(false);
-  }
-}
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-100 to-slate-200 p-6 md:p-8">
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-2xl md:text-3xl font-semibold text-slate-900">
+            Assistant Dashboard
+          </h1>
+          <p className="text-sm text-slate-500 mt-1">
+            Call analytics, billing, invoice history, and restaurant reputation
+          </p>
+        </div>
 
-  // Reload plan then invoice when switching to Invoice view (using fresh values)
+        <div className="hidden sm:flex items-center gap-2 rounded-full bg-white/80 border border-slate-200 px-3 py-1.5 shadow-sm">
+          <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" />
+          <span className="text-sm text-slate-600">Live</span>
+        </div>
+      </div>
 
-useEffect(() => {
-  if (view === "invoice") {
-    (async () => {
-      const fresh = await loadBillingPlan();
-      await loadInvoiceHistory(fresh ?? undefined);
-    })();
-  }
-
-  if (view === "restaurantPhase1" || view === "restaurantPhase2") {
-    void loadRestaurantReputation();
-  }
-}, [view, assistantId]);
-
-return (
-  <div className="min-h-screen bg-gradient-to-br from-slate-100 to-slate-200 p-6 md:p-8">
-    <div className="flex items-center justify-between mb-6">
-  <div>
-    <h1 className="text-2xl md:text-3xl font-semibold text-slate-900">
-      Assistant Dashboard
-    </h1>
-    <p className="text-sm text-slate-500 mt-1">
-      Call analytics, billing, and invoice history
-    </p>
-  </div>
-
-  <div className="hidden sm:flex items-center gap-2 rounded-full bg-white/80 border border-slate-200 px-3 py-1.5 shadow-sm">
-    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" />
-    <span className="text-sm text-slate-600">Live</span>
-  </div>
-</div>
-      {/* Plan info header (NO restaurant name or sign out here anymore) */}
+      {/* Plan info header */}
       <div className="rounded-2xl bg-white/90 backdrop-blur shadow-sm border border-slate-200 p-5 md:p-6 mb-6">
         {planLoading ? (
           <div className="text-sm text-gray-500">Loading plan…</div>
@@ -781,7 +800,7 @@ return (
         <div>
           <label className="text-sm text-gray-600">Time Period</label>
           <select
-           className="w-full border border-slate-300 bg-white rounded-lg px-3 py-2 mt-1 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full border border-slate-300 bg-white rounded-lg px-3 py-2 mt-1 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             value={preset}
             onChange={(e) => setPreset(e.target.value as PresetKey)}
           >
@@ -803,6 +822,7 @@ return (
             disabled={preset !== "custom"}
           />
         </div>
+
         <div>
           <label className="text-sm text-gray-600">Custom End</label>
           <input
@@ -843,13 +863,17 @@ return (
             <option value="hourly">Hourly Analysis</option>
             <option value="billing">Billing</option>
             <option value="invoice">Invoice History</option>
-            <option value="restaurantPhase1">Restaurant Reputation Phase 1</option>
-            <option value="restaurantPhase2">Restaurant Reputation Phase 2</option>
+            <option value="restaurantPhase1">
+              Restaurant Reputation Phase 1
+            </option>
+            <option value="restaurantPhase2">
+              Restaurant Reputation Phase 2
+            </option>
           </select>
         </div>
       </div>
 
-      {/* KPIs (hide when Billing/Invoice view is active) */}
+      {/* KPIs */}
       {view !== "billing" && view !== "invoice" && (
         <>
           <div className="mb-2 text-gray-500 text-sm">
@@ -915,7 +939,6 @@ return (
             <div className="text-red-600">{planError}</div>
           ) : (
             <>
-              {/* List-style summary */}
               <div className="rounded-xl border bg-gray-50 p-4 space-y-2 text-sm">
                 <div className="flex justify-between gap-4">
                   <span className="text-gray-600">Current Month/Year</span>
@@ -971,7 +994,6 @@ return (
                 )}
               </div>
 
-              {/* Visual usage bar */}
               <div className="space-y-2">
                 <div className="text-sm text-gray-600">
                   Monthly usage ({nf(callsThisMonth)} / {nf(planMonthlyCalls)})
@@ -995,6 +1017,7 @@ return (
               Monthly invoices from plan start to current month
             </div>
           </div>
+
           {planError ? (
             <div className="p-5 text-red-600">{planError}</div>
           ) : invoiceLoading ? (
@@ -1015,7 +1038,9 @@ return (
                     <th className="py-2 px-3 text-right">Actual Calls</th>
                     <th className="py-2 px-3 text-right">Call Balance</th>
                     <th className="py-2 px-3 text-right">Call Overage Fee</th>
-                    <th className="py-2 px-3 text-right">Calculated Overage</th>
+                    <th className="py-2 px-3 text-right">
+                      Calculated Overage
+                    </th>
                     <th className="py-2 px-3 text-right">Total Invoice</th>
                   </tr>
                 </thead>
@@ -1060,14 +1085,16 @@ return (
               </table>
             </div>
           )}
-
         </div>
-            ) : view === "restaurantPhase1" ? (
+      ) : view === "restaurantPhase1" ? (
         <div className="rounded-2xl bg-emerald-50 backdrop-blur shadow-sm border border-emerald-200 p-5 space-y-6">
           <div>
-            <div className="font-medium text-lg">Restaurant Reputation — Phase 1</div>
+            <div className="font-medium text-lg">
+              Restaurant Reputation — Phase 1
+            </div>
             <div className="text-sm text-gray-500">
-              Narrative reputation summary for California Sandwiches Winston Churchill
+              Narrative reputation summary for California Sandwiches Winston
+              Churchill
             </div>
           </div>
 
@@ -1076,7 +1103,9 @@ return (
           ) : restaurantRepError ? (
             <div className="text-red-600">{restaurantRepError}</div>
           ) : !restaurantPhase1 ? (
-            <div className="text-gray-400">No Phase 1 restaurant reputation data.</div>
+            <div className="text-gray-400">
+              No Phase 1 restaurant reputation data.
+            </div>
           ) : (
             <div className="space-y-5">
               <div className="rounded-xl border bg-white p-4">
@@ -1110,44 +1139,56 @@ return (
               <div>
                 <div className="font-medium mb-2">Fix Immediately</div>
                 <div className="space-y-3">
-                  {(restaurantPhase1?.answers?.fixImmediately || []).map((x: any, i: number) => (
-                    <div key={i} className="rounded-xl border p-3 bg-white">
-                      <div className="font-medium">
-                        {typeof x === "string" ? x : x?.issue || "Fix"}
+                  {(restaurantPhase1?.answers?.fixImmediately || []).map(
+                    (x: any, i: number) => (
+                      <div key={i} className="rounded-xl border p-3 bg-white">
+                        <div className="font-medium">
+                          {typeof x === "string" ? x : x?.issue || "Fix"}
+                        </div>
+                        {typeof x !== "string" && x?.evidence ? (
+                          <div className="text-xs text-gray-500 mt-1">
+                            {x.evidence}
+                          </div>
+                        ) : null}
                       </div>
-                      {typeof x !== "string" && x?.evidence ? (
-                        <div className="text-xs text-gray-500 mt-1">{x.evidence}</div>
-                      ) : null}
-                    </div>
-                  ))}
+                    )
+                  )}
                 </div>
               </div>
 
               <div>
                 <div className="font-medium mb-2">Requires Capital</div>
                 <div className="space-y-3">
-                  {(restaurantPhase1?.answers?.requiresCapital || []).map((x: any, i: number) => (
-                    <div key={i} className="rounded-xl border p-3 bg-white">
-                      <div className="font-medium">
-                        {typeof x === "string" ? x : x?.issue || "Capital Item"}
+                  {(restaurantPhase1?.answers?.requiresCapital || []).map(
+                    (x: any, i: number) => (
+                      <div key={i} className="rounded-xl border p-3 bg-white">
+                        <div className="font-medium">
+                          {typeof x === "string"
+                            ? x
+                            : x?.issue || "Capital Item"}
+                        </div>
+                        {typeof x !== "string" && x?.evidence ? (
+                          <div className="text-xs text-gray-500 mt-1">
+                            {x.evidence}
+                          </div>
+                        ) : null}
                       </div>
-                      {typeof x !== "string" && x?.evidence ? (
-                        <div className="text-xs text-gray-500 mt-1">{x.evidence}</div>
-                      ) : null}
-                    </div>
-                  ))}
+                    )
+                  )}
                 </div>
               </div>
             </div>
           )}
         </div>
-
-            ) : view === "restaurantPhase2" ? (
+      ) : view === "restaurantPhase2" ? (
         <div className="rounded-2xl bg-white/95 backdrop-blur shadow-sm border border-slate-200 p-5 space-y-6">
           <div>
-            <div className="font-medium text-lg">Restaurant Reputation — Phase 2</div>
+            <div className="font-medium text-lg">
+              Restaurant Reputation — Phase 2
+            </div>
             <div className="text-sm text-gray-500">
-              Trend and theme analysis for California Sandwiches Winston Churchill
+              Trend and theme analysis for California Sandwiches Winston
+              Churchill
             </div>
           </div>
 
@@ -1156,7 +1197,9 @@ return (
           ) : restaurantRepError ? (
             <div className="text-red-600">{restaurantRepError}</div>
           ) : !restaurantPhase2 ? (
-            <div className="text-gray-400">No Phase 2 restaurant reputation data.</div>
+            <div className="text-gray-400">
+              No Phase 2 restaurant reputation data.
+            </div>
           ) : (
             <div className="space-y-5">
               <div className="grid sm:grid-cols-3 gap-4">
@@ -1168,7 +1211,9 @@ return (
                 </div>
 
                 <div className="rounded-xl border bg-gray-50 p-4">
-                  <div className="text-sm text-gray-500">Written Reviews Analyzed</div>
+                  <div className="text-sm text-gray-500">
+                    Written Reviews Analyzed
+                  </div>
                   <div className="text-2xl font-semibold mt-1">
                     {restaurantPhase2?.counts?.totalTextReviews ?? "0"}
                   </div>
@@ -1196,70 +1241,382 @@ return (
                 </div>
               </div>
 
-<div>
-  <div className="font-medium mb-2">Top Risks</div>
-  <div className="space-y-3">
-    {(restaurantPhase2?.narrative?.topRisks || []).map((x: any, i: number) => (
-      <div key={i} className="rounded-xl border p-3 bg-gray-50">
-        <div className="font-medium">{x?.theme || "Risk"}</div>
-        <div className="text-sm text-gray-700 mt-1">
-          {x?.impact || "—"}
-        </div>
-        <div className="text-xs text-gray-500 mt-1">
-          {x?.evidence || "—"}
-        </div>
-      </div>
-    ))}
-  </div>
-</div>
+              <div>
+                <div className="font-medium mb-2">Top Risks</div>
+                <div className="space-y-3">
+                  {(restaurantPhase2?.narrative?.topRisks || []).map(
+                    (x: any, i: number) => (
+                      <div key={i} className="rounded-xl border p-3 bg-gray-50">
+                        <div className="font-medium">{x?.theme || "Risk"}</div>
+                        <div className="text-sm text-gray-700 mt-1">
+                          {x?.impact || "—"}
+                        </div>
+                        <div className="text-xs text-gray-500 mt-1">
+                          {x?.evidence || "—"}
+                        </div>
+                      </div>
+                    )
+                  )}
+                </div>
+              </div>
 
-<div>
-  <div className="font-medium mb-2">Top Fixes (No Capex)</div>
+              <div>
+                <div className="font-medium mb-2">Top Fixes (No Capex)</div>
 
-  <div className="space-y-3">
-    {(restaurantPhase2?.narrative?.topFixesNoCapex || []).map(
-      (x: any, i: number) => (
-        <div key={i} className="rounded-lg border p-3 bg-gray-50">
-          <div className="font-medium">{x?.theme || "Fix"}</div>
+                <div className="space-y-3">
+                  {(restaurantPhase2?.narrative?.topFixesNoCapex || []).map(
+                    (x: any, i: number) => (
+                      <div key={i} className="rounded-lg border p-3 bg-gray-50">
+                        <div className="font-medium">{x?.theme || "Fix"}</div>
 
-          <div className="text-sm text-gray-700 mt-1">
-            {x?.impact || ""}
-          </div>
+                        <div className="text-sm text-gray-700 mt-1">
+                          {x?.impact || ""}
+                        </div>
 
-          <div className="text-xs text-gray-500 mt-1">
-            {x?.evidence || ""}
-          </div>
-        </div>
-      )
-    )}
-  </div>
-</div>
+                        <div className="text-xs text-gray-500 mt-1">
+                          {x?.evidence || ""}
+                        </div>
+                      </div>
+                    )
+                  )}
+                </div>
+              </div>
 
               <div>
                 <div className="font-medium mb-2">Rising Themes</div>
                 <div className="space-y-3">
-                  {(restaurantPhase2?.trend?.risingThemes || []).map((t: any, i: number) => (
-                    <div key={i} className="rounded-xl border p-3 bg-gray-50">
-                      <div className="font-medium">{t?.title || t?.themeId || "Theme"}</div>
-                      <div className="text-sm text-gray-600 mt-1">
-                        Mentions: {t?.mentions ?? 0} · Last 7d: {t?.mentionsLast7d ?? 0} · Prior:{" "}
-                        {t?.mentionsPrior23d ?? 0}
+                  {(restaurantPhase2?.trend?.risingThemes || []).map(
+                    (t: any, i: number) => (
+                      <div key={i} className="rounded-xl border p-3 bg-gray-50">
+                        <div className="font-medium">
+                          {t?.title || t?.themeId || "Theme"}
+                        </div>
+                        <div className="text-sm text-gray-600 mt-1">
+                          Mentions: {t?.mentions ?? 0} · Last 7d:{" "}
+                          {t?.mentionsLast7d ?? 0} · Prior:{" "}
+                          {t?.mentionsPrior23d ?? 0}
+                        </div>
+                      </div>
+                    )
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <div className="font-medium mb-2">Complaint Trends</div>
+
+                {!restaurantComplaintTrends ? (
+                  <div className="rounded-xl border p-3 bg-gray-50 text-sm text-gray-500">
+                    No complaint trend data yet.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="grid sm:grid-cols-3 gap-3">
+                      <div className="rounded-xl border p-3 bg-gray-50">
+                        <div className="text-sm text-gray-500">
+                          Total Complaint Signals
+                        </div>
+                        <div className="font-medium mt-1">
+                          {restaurantComplaintTrends?.totals?.all ?? 0}
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl border p-3 bg-gray-50">
+                        <div className="text-sm text-gray-500">
+                          Voice Complaints
+                        </div>
+                        <div className="font-medium mt-1">
+                          {restaurantComplaintTrends?.totals?.voice ?? 0}
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl border p-3 bg-gray-50">
+                        <div className="text-sm text-gray-500">
+                          Review Complaints
+                        </div>
+                        <div className="font-medium mt-1">
+                          {restaurantComplaintTrends?.totals?.reviews ?? 0}
+                        </div>
                       </div>
                     </div>
-                  ))}
-                </div>
+
+                    <div className="rounded-xl border p-3 bg-gray-50">
+                      <div className="text-sm text-gray-500">Last Updated</div>
+                      <div className="font-medium mt-1">
+                        {restaurantComplaintTrends?.lastUpdatedMs
+                          ? new Date(
+                              restaurantComplaintTrends.lastUpdatedMs
+                            ).toLocaleString()
+                          : "—"}
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border p-3 bg-gray-50">
+                      <div className="text-sm text-gray-500">Window</div>
+                      <div className="font-medium mt-1">
+                        {restaurantComplaintTrends?.windowDays ?? 30} days
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border p-3 bg-gray-50">
+                      <div className="text-sm text-gray-500 mb-2">
+                        Complaint Counts
+                      </div>
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between text-sm">
+                          <span>Cold Food</span>
+                          <span className="font-medium">
+                            {restaurantComplaintTrends?.counts?.cold_food ?? 0}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between text-sm">
+                          <span>Delivery Delay</span>
+                          <span className="font-medium">
+                            {restaurantComplaintTrends?.counts?.delivery_delay ??
+                              0}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between text-sm">
+                          <span>Wrong Order</span>
+                          <span className="font-medium">
+                            {restaurantComplaintTrends?.counts?.wrong_order ?? 0}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between text-sm">
+                          <span>Rude Staff</span>
+                          <span className="font-medium">
+                            {restaurantComplaintTrends?.counts?.rude_staff ?? 0}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border p-3 bg-gray-50">
+                      <div className="text-sm text-gray-500 mb-2">
+                        Complaint Sources
+                      </div>
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between text-sm">
+                          <span>Phone Calls</span>
+                          <span className="font-medium">
+                            {restaurantComplaintTrends?.sources?.voice ?? 0}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between text-sm">
+                          <span>Google Reviews</span>
+                          <span className="font-medium">
+                            {restaurantComplaintTrends?.sources?.google ?? 0}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between text-sm">
+                          <span>Uber Eats Reviews</span>
+                          <span className="font-medium">
+                            {restaurantComplaintTrends?.sources?.ubereats ?? 0}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between text-sm">
+                          <span>Grubhub Reviews</span>
+                          <span className="font-medium">
+                            {restaurantComplaintTrends?.sources?.grubhub ?? 0}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border p-3 bg-gray-50">
+                      <div className="text-sm text-gray-500 mb-2">
+                        Complaint Type by Source
+                      </div>
+
+                      <div className="space-y-3 text-sm">
+                        <div>
+                          <div className="font-medium">Cold Food</div>
+                          <div className="text-gray-600 mt-1">
+                            Phone:{" "}
+                            {restaurantComplaintTrends?.byTypeSource?.cold_food
+                              ?.voice ?? 0}
+                            {" · "}
+                            Google:{" "}
+                            {restaurantComplaintTrends?.byTypeSource?.cold_food
+                              ?.google ?? 0}
+                            {" · "}
+                            Uber Eats:{" "}
+                            {restaurantComplaintTrends?.byTypeSource?.cold_food
+                              ?.ubereats ?? 0}
+                            {" · "}
+                            Grubhub:{" "}
+                            {restaurantComplaintTrends?.byTypeSource?.cold_food
+                              ?.grubhub ?? 0}
+                          </div>
+                        </div>
+
+                        <div>
+                          <div className="font-medium">Delivery Delay</div>
+                          <div className="text-gray-600 mt-1">
+                            Phone:{" "}
+                            {restaurantComplaintTrends?.byTypeSource
+                              ?.delivery_delay?.voice ?? 0}
+                            {" · "}
+                            Google:{" "}
+                            {restaurantComplaintTrends?.byTypeSource
+                              ?.delivery_delay?.google ?? 0}
+                            {" · "}
+                            Uber Eats:{" "}
+                            {restaurantComplaintTrends?.byTypeSource
+                              ?.delivery_delay?.ubereats ?? 0}
+                            {" · "}
+                            Grubhub:{" "}
+                            {restaurantComplaintTrends?.byTypeSource
+                              ?.delivery_delay?.grubhub ?? 0}
+                          </div>
+                        </div>
+
+                        <div>
+                          <div className="font-medium">Wrong Order</div>
+                          <div className="text-gray-600 mt-1">
+                            Phone:{" "}
+                            {restaurantComplaintTrends?.byTypeSource
+                              ?.wrong_order?.voice ?? 0}
+                            {" · "}
+                            Google:{" "}
+                            {restaurantComplaintTrends?.byTypeSource
+                              ?.wrong_order?.google ?? 0}
+                            {" · "}
+                            Uber Eats:{" "}
+                            {restaurantComplaintTrends?.byTypeSource
+                              ?.wrong_order?.ubereats ?? 0}
+                            {" · "}
+                            Grubhub:{" "}
+                            {restaurantComplaintTrends?.byTypeSource
+                              ?.wrong_order?.grubhub ?? 0}
+                          </div>
+                        </div>
+
+                        <div>
+                          <div className="font-medium">Rude Staff</div>
+                          <div className="text-gray-600 mt-1">
+                            Phone:{" "}
+                            {restaurantComplaintTrends?.byTypeSource
+                              ?.rude_staff?.voice ?? 0}
+                            {" · "}
+                            Google:{" "}
+                            {restaurantComplaintTrends?.byTypeSource
+                              ?.rude_staff?.google ?? 0}
+                            {" · "}
+                            Uber Eats:{" "}
+                            {restaurantComplaintTrends?.byTypeSource
+                              ?.rude_staff?.ubereats ?? 0}
+                            {" · "}
+                            Grubhub:{" "}
+                            {restaurantComplaintTrends?.byTypeSource
+                              ?.rude_staff?.grubhub ?? 0}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border p-3 bg-gray-50">
+                      <div className="text-sm text-gray-500">Top Tags</div>
+                      <div className="mt-2 space-y-2">
+                        {(restaurantComplaintTrends?.topTags || []).length ===
+                        0 ? (
+                          <div className="text-sm text-gray-500">
+                            No top tags yet.
+                          </div>
+                        ) : (
+                          (restaurantComplaintTrends?.topTags || []).map(
+                            (tag: any, i: number) => (
+                              <div
+                                key={i}
+                                className="flex items-center justify-between text-sm"
+                              >
+                                <span>{tag?.tag || "—"}</span>
+                                <span className="font-medium">
+                                  {tag?.count ?? 0}
+                                </span>
+                              </div>
+                            )
+                          )
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border p-3 bg-gray-50">
+                      <div className="text-sm text-gray-500 mb-2">
+                        Top Pattern
+                      </div>
+
+                      {!restaurantComplaintTrends?.topPattern ? (
+                        <div className="text-sm text-gray-500">
+                          No complaint pattern detected yet.
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          <div>
+                            <div className="font-medium">
+                              {restaurantComplaintTrends?.topPattern?.title ||
+                                "—"}
+                            </div>
+                            <div className="text-sm text-gray-700 mt-1">
+                              {restaurantComplaintTrends?.topPattern?.summary ||
+                                "—"}
+                            </div>
+                          </div>
+
+                          <div className="text-xs text-gray-500">
+                            Count:{" "}
+                            {restaurantComplaintTrends?.topPattern?.count ?? 0}
+                            {" · "}
+                            Sources:{" "}
+                            {restaurantComplaintTrends?.topPattern?.sourceMix ||
+                              "—"}
+                          </div>
+
+                          <div>
+                            <div className="text-sm text-gray-500 mb-1">
+                              Evidence
+                            </div>
+                            <div className="space-y-2">
+                              {(restaurantComplaintTrends?.topPattern
+                                ?.examples || []).length === 0 ? (
+                                <div className="text-sm text-gray-500">
+                                  No evidence examples yet.
+                                </div>
+                              ) : (
+                                (
+                                  restaurantComplaintTrends?.topPattern
+                                    ?.examples || []
+                                ).map((ex: any, i: number) => (
+                                  <div
+                                    key={i}
+                                    className="rounded-lg border bg-white p-2 text-sm text-gray-700"
+                                  >
+                                    {typeof ex === "string"
+                                      ? ex
+                                      : ex?.text || "—"}
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
         </div>
       ) : (
-          <div className="rounded-2xl bg-green-50 backdrop-blur shadow-sm border border-green-200 overflow-hidden">
+        <div className="rounded-2xl bg-green-50 backdrop-blur shadow-sm border border-green-200 overflow-hidden">
           <div className="px-5 py-4 border-b">
             <div className="font-medium">Call Log</div>
             <div className="text-sm text-gray-500">
               For the selected date or date range
             </div>
           </div>
+
           <div className="overflow-x-auto">
             <table className="min-w-full">
               <thead>
@@ -1349,12 +1706,14 @@ return (
                 Close
               </button>
             </div>
+
             {(() => {
               const d = rows.find((r) => r.id === drawerId);
               if (!d) return <div className="text-gray-500">No details.</div>;
               const mins = d.durationSeconds
                 ? Math.round(d.durationSeconds / 60)
                 : 0;
+
               return (
                 <div className="space-y-3 text-sm">
                   <div>
