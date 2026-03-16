@@ -3287,6 +3287,208 @@ exports.setRestaurantReputationFields = onRequest({ region: "us-central1" }, asy
 
 /* --------------------------- Restaurant Reputation Refresh Helper --------------------------- */
 
+function buildRestaurantComplaintTrends({ reviews = [], voiceComplaints = [] }) {
+  const counts = {
+    cold_food: 0,
+    delivery_delay: 0,
+    wrong_order: 0,
+    rude_staff: 0,
+  };
+
+  const sources = {
+    voice: 0,
+    google: 0,
+    ubereats: 0,
+    grubhub: 0,
+  };
+
+  const byTypeSource = {
+    cold_food: { voice: 0, google: 0, ubereats: 0, grubhub: 0 },
+    delivery_delay: { voice: 0, google: 0, ubereats: 0, grubhub: 0 },
+    wrong_order: { voice: 0, google: 0, ubereats: 0, grubhub: 0 },
+    rude_staff: { voice: 0, google: 0, ubereats: 0, grubhub: 0 },
+  };
+
+  const tagCounter = {};
+  const examplesByType = {
+    cold_food: [],
+    delivery_delay: [],
+    wrong_order: [],
+    rude_staff: [],
+  };
+
+  function detectTypes(text) {
+    const t = String(text || "").toLowerCase();
+    const found = [];
+
+    if (
+      t.includes("cold food") ||
+      t.includes("food was cold") ||
+      t.includes("arrived cold") ||
+      t.includes("meal was cold") ||
+      t.includes("sandwich was cold") ||
+      t.includes("fries were cold") ||
+      t.includes("pizza was cold") ||
+      (t.includes("cold") && t.includes("food"))
+    ) {
+      found.push("cold_food");
+    }
+
+    if (
+      t.includes("late") ||
+      t.includes("delay") ||
+      t.includes("delayed") ||
+      t.includes("took too long") ||
+      t.includes("never arrived") ||
+      t.includes("delivery took") ||
+      t.includes("long wait")
+    ) {
+      found.push("delivery_delay");
+    }
+
+    if (
+      t.includes("wrong order") ||
+      t.includes("incorrect order") ||
+      t.includes("missing item") ||
+      t.includes("missing items") ||
+      t.includes("forgot") ||
+      t.includes("gave me the wrong") ||
+      t.includes("order was wrong")
+    ) {
+      found.push("wrong_order");
+    }
+
+    if (
+      t.includes("rude") ||
+      t.includes("bad attitude") ||
+      t.includes("hung up") ||
+      t.includes("unprofessional") ||
+      t.includes("disrespectful")
+    ) {
+      found.push("rude_staff");
+    }
+
+    return found;
+  }
+
+  function pushExample(bucket, text, source) {
+    if (!text) return;
+    if (bucket.length >= 3) return;
+    bucket.push({ text: String(text).slice(0, 220), source });
+  }
+
+  function addTag(tag) {
+    tagCounter[tag] = (tagCounter[tag] || 0) + 1;
+  }
+
+  function normalizeSource(source) {
+    const s = String(source || "").toLowerCase();
+
+    if (s.includes("uber")) return "ubereats";
+    if (s.includes("grubhub")) return "grubhub";
+    if (s.includes("google")) return "google";
+    return "google";
+  }
+
+  for (const item of voiceComplaints) {
+    const text = String(item?.text || item?.transcript || "").trim();
+    if (!text) continue;
+
+    sources.voice += 1;
+
+    const types = detectTypes(text);
+    for (const type of types) {
+      counts[type] += 1;
+      byTypeSource[type].voice += 1;
+      addTag(type);
+      pushExample(examplesByType[type], text, "voice");
+    }
+  }
+
+  for (const review of reviews) {
+    const text = String(review?.text || review?.snippet || "").trim();
+    if (!text) continue;
+
+    const src = normalizeSource(review?.source);
+    if (sources[src] === undefined) {
+      sources.google += 1;
+    } else {
+      sources[src] += 1;
+    }
+
+    const types = detectTypes(text);
+    for (const type of types) {
+      counts[type] += 1;
+      if (byTypeSource[type][src] === undefined) {
+        byTypeSource[type].google += 1;
+      } else {
+        byTypeSource[type][src] += 1;
+      }
+      addTag(type);
+      pushExample(examplesByType[type], text, src);
+    }
+  }
+
+  const topTags = Object.entries(tagCounter)
+    .map(([tag, count]) => ({ tag, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 8);
+
+  const topTag = topTags[0]?.tag || null;
+
+  let topPattern = null;
+  if (topTag) {
+    const sourceMixParts = [];
+    const topSources = byTypeSource[topTag];
+
+    if ((topSources?.voice || 0) > 0) sourceMixParts.push(`Phone ${topSources.voice}`);
+    if ((topSources?.google || 0) > 0) sourceMixParts.push(`Google ${topSources.google}`);
+    if ((topSources?.ubereats || 0) > 0) sourceMixParts.push(`Uber Eats ${topSources.ubereats}`);
+    if ((topSources?.grubhub || 0) > 0) sourceMixParts.push(`Grubhub ${topSources.grubhub}`);
+
+    const titleMap = {
+      cold_food: "Cold food complaints are emerging",
+      delivery_delay: "Delivery delay complaints are emerging",
+      wrong_order: "Wrong order complaints are emerging",
+      rude_staff: "Rude staff complaints are emerging",
+    };
+
+    const summaryMap = {
+      cold_food: "Customers are reporting food temperature problems across complaint signals.",
+      delivery_delay: "Customers are reporting delivery delays and long waits.",
+      wrong_order: "Customers are reporting missing or incorrect items.",
+      rude_staff: "Customers are reporting rude or unprofessional staff interactions.",
+    };
+
+    topPattern = {
+      title: titleMap[topTag] || "Complaint pattern detected",
+      summary: summaryMap[topTag] || "A complaint pattern is emerging across recent signals.",
+      count: counts[topTag] || 0,
+      sourceMix: sourceMixParts.join(" · ") || "—",
+      examples: examplesByType[topTag] || [],
+    };
+  }
+
+  const reviewComplaintSignals =
+    (sources.google || 0) + (sources.ubereats || 0) + (sources.grubhub || 0);
+
+  return {
+    lastUpdatedMs: Date.now(),
+    windowDays: 30,
+    totals: {
+      all: voiceComplaints.length + reviewComplaintSignals,
+      voice: voiceComplaints.length,
+      reviews: reviewComplaintSignals,
+    },
+    counts,
+    sources,
+    byTypeSource,
+    topTags,
+    topPattern,
+  };
+}
+
+
 async function runRestaurantReputationRefresh({
   restaurantCode,
   apiKeySerp,
@@ -3417,6 +3619,12 @@ async function runRestaurantReputationRefresh({
   const reviewsArr = Object.values(reviewsObj);
   const voiceComplaints = await getRecentVoiceComplaintSignals(restaurantCode, { windowDays: 30 });
 
+  const complaintTrends = buildRestaurantComplaintTrends({
+  reviews: reviewsArr,
+  voiceComplaints,
+});
+
+
   await db.ref(`${basePath}/meta`).update({
     ok: true,
     restaurantCode,
@@ -3462,13 +3670,29 @@ async function runRestaurantReputationRefresh({
     snapshotDayKey: nowKey,
   });
 
+  await db.ref(`restaurants/${restaurantCode}/reputation/complaintTrends/latest`).set({
+    ...complaintTrends,
+    snapshotDayKey: nowKey,
+  });
+    if (phase2Report && typeof phase2Report === "object") {
+    phase2Report.complaintTrends = complaintTrends;
+  }
+
   return {
     ok: true,
     restaurantCode,
     totalReviews: reviewsArr.length,
     storedReviews,
     risingThemes: phase2Report?.trend?.risingThemes?.length || 0,
+    complaintTrendsSummary: {
+      totalSignals: complaintTrends?.totals?.all || 0,
+      voice: complaintTrends?.totals?.voice || 0,
+      reviews: complaintTrends?.totals?.reviews || 0,
+      topTag: complaintTrends?.topTags?.[0]?.tag || null,
+      topTagCount: complaintTrends?.topTags?.[0]?.count || 0,
+    },
   };
+
 }
 
 /* --------------------------- HTTPS: refreshRestaurantReputation --------------------------- */
