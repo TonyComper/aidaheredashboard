@@ -2412,6 +2412,31 @@ const RESTAURANT_THEME_META = {
   menu_availability_stock: { title: "Menu availability / stock issues", bucket: "ops" },
 };
 
+async function getRecentVoiceComplaintSignals(restaurantCode, { windowDays = 30 } = {}) {
+  const nowMs = Date.now();
+  const cutoffMs = nowMs - windowDays * 24 * 60 * 60 * 1000;
+
+  const snap = await db
+    .ref(`restaurants/${restaurantCode}/reputationSignals/voiceComplaints/items`)
+    .get();
+
+  const obj = snap.val() || {};
+
+  return Object.values(obj)
+    .map((x) => x || {})
+    .filter((x) => {
+      const dateMs =
+        typeof x.dateMs === "number"
+          ? x.dateMs
+          : typeof x.createdAtMs === "number"
+          ? x.createdAtMs
+          : null;
+
+      return dateMs != null && dateMs >= cutoffMs;
+    });
+}
+
+
 /* --------------------------- Restaurant Reputation Phase 1 Builder --------------------------- */
 
 async function buildRestaurantReputationPhase1Report({ restaurantCode, restaurantDisplayName, reviews, apiKey }) {
@@ -3387,6 +3412,11 @@ async function runRestaurantReputationRefresh({
     await db.ref().update(updates);
   }
 
+  const reviewsSnap = await db.ref(`${basePath}/reviews`).get();
+  const reviewsObj = reviewsSnap.val() || {};
+  const reviewsArr = Object.values(reviewsObj);
+  const voiceComplaints = await getRecentVoiceComplaintSignals(restaurantCode, { windowDays: 30 });
+
   await db.ref(`${basePath}/meta`).update({
     ok: true,
     restaurantCode,
@@ -3398,14 +3428,11 @@ async function runRestaurantReputationRefresh({
     cutoffMs,
     cutoffIso: new Date(cutoffMs).toISOString(),
     storedReviews,
+    voiceComplaintCount30d: voiceComplaints.length,
     googleTotalRatings: placeSignals?.userRatingsTotal || null,
     googleRating: placeSignals?.rating || null,
     note: "Restaurant reputation refresh (manual or scheduled)",
   });
-
-  const reviewsSnap = await db.ref(`${basePath}/reviews`).get();
-  const reviewsObj = reviewsSnap.val() || {};
-  const reviewsArr = Object.values(reviewsObj);
 
   const phase1Report = await buildRestaurantReputationPhase1Report({
     restaurantCode,
