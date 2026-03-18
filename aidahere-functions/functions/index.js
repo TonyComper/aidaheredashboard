@@ -50,6 +50,13 @@
 
 const slugify = require("slugify");
 const admin = require("firebase-admin");
+const axios = require("axios");
+const {
+  classifyRestaurantComplaintText,
+} = require("./lib/reputation/classifyRestaurantComplaint");
+const {
+  RESTAURANT_COMPLAINT_TAXONOMY,
+} = require("./lib/reputation/restaurantComplaintTaxonomy");
 const { defineSecret } = require("firebase-functions/params");
 const { onRequest } = require("firebase-functions/v2/https");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
@@ -2734,6 +2741,20 @@ async function buildRestaurantReputationPhase2Report({
 
   const buckets = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
 
+    const voiceComplaints = await getRecentVoiceComplaintSignals(restaurantCode, {
+    windowDays: 30,
+  });
+
+  const complaintTrends = buildRestaurantComplaintTrends({
+    reviewItems: (norm || []).map((r) => ({
+      text: r?.text || "",
+    })),
+    callItems: (voiceComplaints || []).map((c) => ({
+      transcript: c?.transcript || c?.summary || "",
+    })),
+    messageItems: [],
+  });
+
   for (const r of norm) {
     totalTextReviews++;
 
@@ -2912,10 +2933,42 @@ async function buildRestaurantReputationPhase2Report({
     }
   }
 
-  const riskLevelFinal =
-    ["LOW", "MEDIUM", "HIGH"].includes(gpt?.riskLevel) ? gpt.riskLevel : riskRule;
+const riskLevelFinal =
+  ["LOW", "MEDIUM", "HIGH"].includes(gpt?.riskLevel) ? gpt.riskLevel : riskRule;
 
-  return {
+function buildComplaintAlerts(complaintTrends) {
+  const alerts = [];
+
+  const counts = complaintTrends?.counts || {};
+
+  if ((counts.FOOD_QUALITY || 0) >= 2) {
+    alerts.push({
+      type: "FOOD_QUALITY_SPIKE",
+      severity: "HIGH",
+      message: "Multiple recent complaints about food quality detected",
+    });
+  }
+
+  if ((counts.VALUE_PRICING || 0) >= 2) {
+    alerts.push({
+      type: "VALUE_DROP",
+      severity: "MEDIUM",
+      message: "Guests are complaining about value/price vs portion",
+    });
+  }
+
+  if ((counts.SERVICE || 0) >= 2) {
+    alerts.push({
+      type: "SERVICE_ISSUES",
+      severity: "MEDIUM",
+      message: "Recurring service complaints detected",
+    });
+  }
+
+  return alerts;
+}
+
+return {
     ok: true,
     restaurantCode,
     restaurantDisplayName: restaurantDisplayName || "",
@@ -2935,6 +2988,9 @@ async function buildRestaurantReputationPhase2Report({
       riskRule,
       riskLevel: riskLevelFinal,
     },
+
+    alerts: buildComplaintAlerts(complaintTrends),
+
     heatmap: {
       dayKeys,
       themes: heatmapTop,
@@ -2945,6 +3001,7 @@ async function buildRestaurantReputationPhase2Report({
     },
     sampleRecent,
     evidence: sampleRecent,
+    complaintTrends,
     narrative: gpt
       ? {
           executiveSummary: safeTrim(gpt.executiveSummary),
@@ -3619,11 +3676,17 @@ async function runRestaurantReputationRefresh({
   const reviewsArr = Object.values(reviewsObj);
   const voiceComplaints = await getRecentVoiceComplaintSignals(restaurantCode, { windowDays: 30 });
 
-  const complaintTrends = buildRestaurantComplaintTrends({
-  reviews: reviewsArr,
-  voiceComplaints,
+const complaintTrends = buildRestaurantComplaintTrends({
+  reviewItems: (reviews || []).map((r) => ({
+    text: r?.text || r?.snippet || r?.reviewText || "",
+  })),
+  callItems: (recentCalls || []).map((c) => ({
+    transcript: c?.transcript || c?.summary || "",
+  })),
+  messageItems: (recentMessages || []).map((m) => ({
+    message: m?.message || m?.text || "",
+  })),
 });
-
 
   await db.ref(`${basePath}/meta`).update({
     ok: true,
@@ -3739,6 +3802,236 @@ exports.refreshRestaurantReputation = onRequest(
       return res.json(result);
     } catch (err) {
       console.error("refreshRestaurantReputation error:", err);
+      return res.status(500).json({ ok: false, error: String(err?.message || err) });
+    }
+  }
+);
+
+function emptyComplaintTrends() {
+  return {
+    totals: {
+      matchedItems: 0,
+      uniqueTypes: 0,
+      uniquePatterns: 0,
+    },
+    counts: {},
+    sources: {},
+    byTypeSource: {},
+    topTags: [],
+    topPattern: [],
+  };
+}
+
+function incrementMap(map, key, amount = 1) {
+  if (!key) return;
+  map[key] = (map[key] || 0) + amount;
+}
+
+function buildRestaurantComplaintTrends({
+  reviewItems = [],
+  callItems = [],
+  messageItems = [],
+}) {
+  const trends = emptyComplaintTrends();
+
+  const typeCounts = {};
+  const patternCounts = {};
+  const sourceCounts = {};
+  const byTypeSource = {};
+
+  function processItems(items, sourceName) {
+    for (const item of items) {
+      const text =
+        item?.text ||
+        item?.reviewText ||
+        item?.content ||
+        item?.transcript ||
+        item?.message ||
+        "";
+
+      const matches = classifyRestaurantComplaintText(text, sourceName);
+      if (!matches.length) continue;
+
+      incrementMap(sourceCounts, sourceName, 1);
+
+      for (const match of matches) {
+        incrementMap(typeCounts, match.type, 1);
+        incrementMap(patternCounts, match.pattern, 1);
+
+        if (!byTypeSource[match.type]) byTypeSource[match.type] = {};
+        incrementMap(byTypeSource[match.type], sourceName, 1);
+
+        trends.totals.matchedItems += 1;
+      }
+    }
+  }
+
+  processItems(reviewItems, "review");
+  processItems(callItems, "call");
+  processItems(messageItems, "message");
+
+  trends.counts = typeCounts;
+  trends.sources = sourceCounts;
+  trends.byTypeSource = byTypeSource;
+
+  trends.totals.uniqueTypes = Object.keys(typeCounts).length;
+  trends.totals.uniquePatterns = Object.keys(patternCounts).length;
+
+  trends.topTags = Object.entries(typeCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10)
+    .map(([type, count]) => {
+      const category = RESTAURANT_COMPLAINT_TAXONOMY.find((x) => x.type === type);
+      return {
+        key: type,
+        label: category?.label || type,
+        count,
+      };
+    });
+
+  trends.topPattern = Object.entries(patternCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10)
+    .map(([patternKey, count]) => {
+      let found = null;
+
+      for (const category of RESTAURANT_COMPLAINT_TAXONOMY) {
+        const pattern = category.patterns.find((p) => p.key === patternKey);
+        if (pattern) {
+          found = {
+            type: category.type,
+            typeLabel: category.label,
+            pattern: pattern.key,
+            label: pattern.label,
+            count,
+          };
+          break;
+        }
+      }
+
+      return (
+        found || {
+          type: "OTHER",
+          typeLabel: "Other",
+          pattern: patternKey,
+          label: patternKey,
+          count,
+        }
+      );
+    });
+
+  return trends;
+}
+
+exports.createRestaurantOnboarding = onRequest(
+  {
+    region: "us-central1",
+    secrets: [SERPAPI_API_KEY, OPENAI_API_KEY],
+    timeoutSeconds: 300,
+    memory: "1GiB",
+  },
+  async (req, res) => {
+    setCors(res);
+    if (req.method === "OPTIONS") return res.status(204).send("");
+
+    try {
+      const restaurantCode = safeTrim(req.body?.restaurantCode || "").toLowerCase();
+      const restaurantName = safeTrim(req.body?.restaurantName || "");
+      const assistantId = safeTrim(req.body?.assistantId || "");
+      const timeZone = safeTrim(req.body?.timeZone || "");
+      const googlePlaceId = safeTrim(req.body?.googlePlaceId || "");
+      const userDocId = safeTrim(req.body?.userDocId || "");
+
+      if (!restaurantCode) {
+        return res.status(400).json({ ok: false, error: "restaurantCode required" });
+      }
+
+      if (!restaurantName) {
+        return res.status(400).json({ ok: false, error: "restaurantName required" });
+      }
+
+      if (!assistantId) {
+        return res.status(400).json({ ok: false, error: "assistantId required" });
+      }
+
+      if (!timeZone) {
+        return res.status(400).json({ ok: false, error: "timeZone required" });
+      }
+
+      if (!googlePlaceId) {
+        return res.status(400).json({ ok: false, error: "googlePlaceId required" });
+      }
+
+      if (!userDocId) {
+        return res.status(400).json({ ok: false, error: "userDocId required" });
+      }
+
+      const firestore = admin.firestore();
+
+      await firestore.collection("users").doc(userDocId).set(
+        {
+          assistantId,
+          restaurantCode,
+          restaurantName,
+        },
+        { merge: true }
+      );
+
+      await db.ref(`restaurants/${restaurantCode}/config`).update({
+        assistantId,
+        timeZone,
+      });
+
+      const serpMapsResp = await axios.get("https://serpapi.com/search.json", {
+        params: {
+          engine: "google_maps",
+          q: restaurantName,
+          hl: "en",
+          api_key: SERPAPI_API_KEY.value(),
+        },
+      });
+
+      const resolvedSerpDataId =
+        safeTrim(serpMapsResp?.data?.place_results?.data_id || "");
+
+      if (!resolvedSerpDataId) {
+        return res.status(400).json({
+          ok: false,
+          error: "Unable to resolve serpDataId from SerpAPI",
+          restaurantName,
+        });
+      }
+
+      await db.ref(`restaurants/${restaurantCode}/config/reputation`).update({
+        googlePlaceId,
+        serpDataId: resolvedSerpDataId,
+        restaurantDisplayName: restaurantName,
+        active: true,
+      });
+
+      const apiKeyOpenAI = OPENAI_API_KEY.value();
+
+      const refreshResult = await runRestaurantReputationRefresh({
+        restaurantCode,
+        apiKeySerp: SERPAPI_API_KEY.value(),
+        apiKeyOpenAI,
+      });
+
+      return res.json({
+        ok: true,
+        step: "onboarding_completed",
+        restaurantCode,
+        restaurantName,
+        assistantId,
+        timeZone,
+        googlePlaceId,
+        serpDataId: resolvedSerpDataId,
+        userDocId,
+        refreshResult,
+      });
+      
+    } catch (err) {
+      console.error("createRestaurantOnboarding error:", err);
       return res.status(500).json({ ok: false, error: String(err?.message || err) });
     }
   }

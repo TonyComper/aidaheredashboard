@@ -348,6 +348,7 @@ export default function AssistantDashboardVapi({
   const [restaurantMeta, setRestaurantMeta] = useState<any>(null);
   const [restaurantComplaintTrends, setRestaurantComplaintTrends] =
     useState<any>(null);
+  const [restaurantAlerts, setRestaurantAlerts] = useState<any[]>([]);
 
   // Resolve the date range (local time)
   const { start, end } = useMemo(() => {
@@ -699,6 +700,7 @@ export default function AssistantDashboardVapi({
     setRestaurantPhase1(null);
     setRestaurantPhase2(null);
     setRestaurantComplaintTrends(null);
+    setRestaurantAlerts([]);
 
     try {
       const restaurantCode = authCtx?.profile?.restaurantCode || null;
@@ -736,6 +738,7 @@ export default function AssistantDashboardVapi({
       });
 
       setRestaurantComplaintTrends(phase2Json?.data?.complaintTrends || null);
+      setRestaurantAlerts(phase2Json?.data?.alerts || []);
     } catch (e) {
       setRestaurantRepError(
         e instanceof Error ? e.message : "Failed to load restaurant reputation."
@@ -1189,6 +1192,26 @@ export default function AssistantDashboardVapi({
               Trend and theme analysis for {restaurantPhase2?.restaurantDisplayName || "Restaurant"}
             </div>
           </div>
+              {restaurantComplaintTrends?.topTags?.length > 0 && (
+                <div className="rounded-xl border bg-white p-4">
+                  <div className="text-sm text-gray-500 mb-3">
+                    Top Complaint Categories
+                  </div>
+
+                  <div className="grid sm:grid-cols-3 gap-3">
+                    {restaurantComplaintTrends.topTags.slice(0, 3).map((tag: any, i: number) => (
+                      <div key={i} className="rounded-lg border bg-gray-50 p-3">
+                        <div className="text-sm text-gray-500">
+                          {tag?.label || tag?.key || "Category"}
+                        </div>
+                        <div className="text-2xl font-semibold mt-1">
+                          {tag?.count ?? 0}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
           {restaurantRepLoading ? (
             <div className="text-gray-500">Loading reputation analysis…</div>
@@ -1203,6 +1226,7 @@ export default function AssistantDashboardVapi({
               <div className="grid sm:grid-cols-3 gap-4">
                 <div className="rounded-xl border bg-gray-50 p-4">
                   <div className="text-sm text-gray-500">Risk Level</div>
+
                   <div className="text-2xl font-semibold mt-1">
                     {restaurantPhase2?.trend?.riskLevel || "N/A"}
                   </div>
@@ -1226,9 +1250,220 @@ export default function AssistantDashboardVapi({
               </div>
 
               <div>
+                <div className="font-medium mb-2">Active Alerts</div>
+
+                {restaurantAlerts.length === 0 ? (
+                  <div className="rounded-xl border p-3 bg-gray-50 text-sm text-gray-500">
+                    No active alerts.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {restaurantAlerts.map((alert: any, i: number) => {
+                      const severity = String(alert?.severity || "").toUpperCase();
+
+                      const boxClass =
+                        severity === "HIGH"
+                          ? "rounded-xl border p-3 bg-red-50 border-red-200"
+                          : severity === "MEDIUM"
+                          ? "rounded-xl border p-3 bg-amber-50 border-amber-200"
+                          : "rounded-xl border p-3 bg-blue-50 border-blue-200";
+
+                      const badgeClass =
+                        severity === "HIGH"
+                          ? "bg-red-100 text-red-700"
+                          : severity === "MEDIUM"
+                          ? "bg-amber-100 text-amber-700"
+                          : "bg-blue-100 text-blue-700";
+
+                      return (
+                        <div key={i} className={boxClass}>
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="font-medium text-sm">
+                              {alert?.message || "Alert"}
+                            </div>
+                            <div
+                              className={`text-xs font-semibold px-2 py-1 rounded-full ${badgeClass}`}
+                            >
+                              {severity || "INFO"}
+                            </div>
+                          </div>
+
+                          {alert?.type ? (
+                            <div className="text-xs text-gray-500 mt-2">
+                              {alert.type}
+                            </div>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div>
                 <div className="font-medium mb-1">Executive Summary</div>
                 <div className="text-sm text-gray-700">
                   {restaurantPhase2?.narrative?.executiveSummary || "—"}
+                </div>
+              </div>
+
+              {/* ✅ Complaint Trends */}
+{restaurantComplaintTrends && (
+  <div className="space-y-4">
+    <div className="font-medium">Complaint Trends</div>
+
+    {/* Top Categories */}
+    {restaurantComplaintTrends?.topTags?.length > 0 && (
+      <div>
+        <div className="text-sm text-gray-500 mb-2">Top Complaint Categories</div>
+        <div className="flex flex-wrap gap-2">
+          {restaurantComplaintTrends.topTags.map((tag: any, i: number) => (
+            <div
+              key={i}
+              className="px-3 py-1 rounded-full bg-red-50 border border-red-200 text-sm"
+            >
+              {tag.label} ({tag.count})
+            </div>
+          ))}
+        </div>
+      </div>
+    )}
+
+                  {restaurantComplaintTrends?.topPattern?.length > 0 && (
+                <div className="rounded-xl border bg-white p-4">
+                  <div className="text-sm text-gray-500 mb-3">
+                    Top Complaint Patterns
+                  </div>
+
+              {restaurantComplaintTrends?.sources &&
+                Object.keys(restaurantComplaintTrends.sources).length > 0 && (
+                  <div className="rounded-xl border bg-white p-4">
+                    <div className="text-sm text-gray-500 mb-3">
+                      Complaint Sources
+                    </div>
+
+                                  {restaurantComplaintTrends?.byTypeSource &&
+                Object.keys(restaurantComplaintTrends.byTypeSource).length > 0 && (
+                  <div className="rounded-xl border bg-white p-4">
+                    <div className="text-sm text-gray-500 mb-3">
+                      Complaint Type by Source
+                    </div>
+
+                    <div className="space-y-3">
+                      {Object.entries(restaurantComplaintTrends.byTypeSource).map(
+                        ([type, sourceMap]: any) => (
+                          <div
+                            key={type}
+                            className="rounded-lg border bg-gray-50 p-3"
+                          >
+                            <div className="font-medium text-sm">
+                              {String(type)
+                                .replace(/_/g, " ")
+                                .toLowerCase()
+                                .replace(/\b\w/g, (c) => c.toUpperCase())}
+                            </div>
+
+                            <div className="mt-2 space-y-1">
+                              {Object.entries(sourceMap || {}).map(
+                                ([source, count]: any) => (
+                                  <div
+                                    key={source}
+                                    className="flex items-center justify-between text-sm"
+                                  >
+                                    <span className="capitalize">{source}</span>
+                                    <span className="font-medium">
+                                      {count ?? 0}
+                                    </span>
+                                  </div>
+                                )
+                              )}
+                            </div>
+                          </div>
+                        )
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                    <div className="space-y-2">
+                      {Object.entries(restaurantComplaintTrends.sources).map(
+                        ([source, count]: any) => (
+                          <div
+                            key={source}
+                            className="flex items-center justify-between rounded-lg border bg-gray-50 p-3"
+                          >
+                            <div className="text-sm capitalize">{source}</div>
+                            <div className="text-lg font-semibold">
+                              {count ?? 0}
+                            </div>
+                          </div>
+                        )
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                  <div className="space-y-2">
+                    {restaurantComplaintTrends.topPattern
+                      .slice(0, 3)
+                      .map((pattern: any, i: number) => (
+                        <div
+                          key={i}
+                          className="flex items-center justify-between rounded-lg border bg-gray-50 p-3"
+                        >
+                          <div>
+                            <div className="font-medium text-sm">
+                              {pattern?.label || pattern?.pattern || "Pattern"}
+                            </div>
+                            <div className="text-xs text-gray-500 mt-1">
+                              {pattern?.typeLabel || pattern?.type || "—"}
+                            </div>
+                          </div>
+
+                          <div className="text-lg font-semibold">
+                            {pattern?.count ?? 0}
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              )}
+
+    {/* Pattern Breakdown */}
+    {restaurantComplaintTrends?.topPattern?.length > 0 && (
+      <div>
+        <div className="text-sm text-gray-500 mb-2">Top Issues</div>
+        <div className="space-y-2">
+          {restaurantComplaintTrends.topPattern.map((p: any, i: number) => (
+            <div
+              key={i}
+              className="flex items-center justify-between border rounded-lg p-2 text-sm"
+            >
+              <div>
+                <div className="font-medium">{p.patternLabel}</div>
+                <div className="text-xs text-gray-500">{p.typeLabel}</div>
+              </div>
+              <div className="font-semibold">{p.count}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    )}
+
+    {/* Totals */}
+    <div className="text-xs text-gray-500">
+      {restaurantComplaintTrends?.totals?.matchedItems || 0} total complaint matches across{" "}
+      {restaurantComplaintTrends?.totals?.uniqueTypes || 0} categories
+    </div>
+  </div>
+)}
+
+              <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
+                <div className="text-sm font-medium text-blue-900">
+                  Weekly Change Signal
+                </div>
+                <div className="text-sm text-blue-800 mt-1">
+                  {restaurantPhase2?.narrative?.whatChangedThisWeek || "No major weekly change detected."}
                 </div>
               </div>
 
