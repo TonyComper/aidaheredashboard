@@ -1096,7 +1096,8 @@ export default function AssistantDashboardVapi({
               Restaurant Reputation — Phase 1
             </div>
             <div className="text-sm text-gray-500">
-                Narrative reputation summary for {restaurantPhase1?.restaurantDisplayName || "Restaurant"}
+              Narrative reputation summary for{" "}
+              {restaurantPhase1?.restaurantDisplayName || "Restaurant"}
             </div>
           </div>
 
@@ -1189,29 +1190,10 @@ export default function AssistantDashboardVapi({
               Restaurant Reputation — Phase 2
             </div>
             <div className="text-sm text-gray-500">
-              Trend and theme analysis for {restaurantPhase2?.restaurantDisplayName || "Restaurant"}
+              Trend and theme analysis for{" "}
+              {restaurantPhase2?.restaurantDisplayName || "Restaurant"}
             </div>
           </div>
-              {restaurantComplaintTrends?.topTags?.length > 0 && (
-                <div className="rounded-xl border bg-white p-4">
-                  <div className="text-sm text-gray-500 mb-3">
-                    Top Complaint Categories
-                  </div>
-
-                  <div className="grid sm:grid-cols-3 gap-3">
-                    {restaurantComplaintTrends.topTags.slice(0, 3).map((tag: any, i: number) => (
-                      <div key={i} className="rounded-lg border bg-gray-50 p-3">
-                        <div className="text-sm text-gray-500">
-                          {tag?.label || tag?.key || "Category"}
-                        </div>
-                        <div className="text-2xl font-semibold mt-1">
-                          {tag?.count ?? 0}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
 
           {restaurantRepLoading ? (
             <div className="text-gray-500">Loading reputation analysis…</div>
@@ -1226,7 +1208,6 @@ export default function AssistantDashboardVapi({
               <div className="grid sm:grid-cols-3 gap-4">
                 <div className="rounded-xl border bg-gray-50 p-4">
                   <div className="text-sm text-gray-500">Risk Level</div>
-
                   <div className="text-2xl font-semibold mt-1">
                     {restaurantPhase2?.trend?.riskLevel || "N/A"}
                   </div>
@@ -1248,6 +1229,129 @@ export default function AssistantDashboardVapi({
                   </div>
                 </div>
               </div>
+
+              {restaurantComplaintTrends?.topTags?.length > 0 && (
+                <div className="rounded-xl border bg-white p-4">
+                  <div className="text-sm text-gray-500 mb-3">
+                    Top Complaint Categories
+                  </div>
+
+                  <div className="grid sm:grid-cols-3 gap-3">
+                    {restaurantComplaintTrends.topTags
+                      .slice(0, 3)
+                      .map((tag: any, i: number) => (
+                        <div key={i} className="rounded-lg border bg-gray-50 p-3">
+                          <div className="text-sm text-gray-500">
+                            {tag?.label || tag?.key || "Category"}
+                          </div>
+                          <div className="text-2xl font-semibold mt-1">
+                            {tag?.count ?? 0}
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              )}
+
+              {restaurantComplaintTrends?.topPattern?.length > 0 && (
+                <div className="rounded-xl border bg-white p-4">
+                  <div className="text-sm text-gray-500 mb-3">
+                    Top Complaint Patterns
+                  </div>
+
+                  <div className="space-y-2">
+                    {restaurantComplaintTrends.topPattern
+                      .slice(0, 3)
+                      .map((pattern: any, i: number) => (
+                        <div
+                          key={i}
+                          className="flex items-center justify-between rounded-lg border bg-gray-50 p-3"
+                        >
+                          <div>
+                            <div className="font-medium text-sm">
+                              {pattern?.label || pattern?.pattern || "Pattern"}
+                            </div>
+                            <div className="text-xs text-gray-500 mt-1">
+                              {pattern?.typeLabel || pattern?.type || "—"}
+                            </div>
+                          </div>
+
+                          <div className="text-lg font-semibold">
+                            {pattern?.count ?? 0}
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              )}
+
+              {restaurantComplaintTrends?.sources &&
+                Object.keys(restaurantComplaintTrends.sources).length > 0 && (
+                  <div className="rounded-xl border bg-white p-4">
+                    <div className="text-sm text-gray-500 mb-3">
+                      Complaint Sources
+                    </div>
+
+                    <div className="space-y-2">
+                      {Object.entries(restaurantComplaintTrends.sources).map(
+                        ([source, count]: any) => (
+                          <div
+                            key={source}
+                            className="flex items-center justify-between rounded-lg border bg-gray-50 p-3"
+                          >
+                            <div className="text-sm capitalize">{source}</div>
+                            <div className="text-lg font-semibold">
+                              {count ?? 0}
+                            </div>
+                          </div>
+                        )
+                      )}
+                    </div>
+                  </div>
+                )}
+
+              {restaurantComplaintTrends?.byTypeSource &&
+                Object.keys(restaurantComplaintTrends.byTypeSource).length > 0 && (
+                  <div className="rounded-xl border bg-white p-4">
+                    <div className="text-sm text-gray-500 mb-3">
+                      Complaint Type by Source
+                    </div>
+
+                    <div className="space-y-3">
+                      {Object.entries(restaurantComplaintTrends.byTypeSource).map(
+                        ([type, sourceMap]: any) => (
+                          <div
+                            key={type}
+                            className="rounded-lg border bg-gray-50 p-3"
+                          >
+                            <div className="font-medium text-sm">
+                              {String(type)
+                                .replace(/_/g, " ")
+                                .toLowerCase()
+                                .replace(/\b\w/g, (c) => c.toUpperCase())}
+                            </div>
+
+                            <div className="mt-2 space-y-1">
+                              {Object.entries(sourceMap || {}).map(
+                                ([source, count]: any) => (
+                                  <div
+                                    key={source}
+                                    className="flex items-center justify-between text-sm"
+                                  >
+                                    <span className="capitalize">{source}</span>
+                                    <span className="font-medium">
+                                      {count ?? 0}
+                                    </span>
+                                  </div>
+                                )
+                              )}
+                            </div>
+                          </div>
+                        )
+                      )}
+                    </div>
+                  </div>
+                )}
 
               <div>
                 <div className="font-medium mb-2">Active Alerts</div>
@@ -1307,163 +1411,72 @@ export default function AssistantDashboardVapi({
                 </div>
               </div>
 
-              {/* ✅ Complaint Trends */}
-{restaurantComplaintTrends && (
-  <div className="space-y-4">
-    <div className="font-medium">Complaint Trends</div>
+              {restaurantComplaintTrends && (
+                <div className="space-y-4">
+                  <div className="font-medium">Complaint Trends</div>
 
-    {/* Top Categories */}
-    {restaurantComplaintTrends?.topTags?.length > 0 && (
-      <div>
-        <div className="text-sm text-gray-500 mb-2">Top Complaint Categories</div>
-        <div className="flex flex-wrap gap-2">
-          {restaurantComplaintTrends.topTags.map((tag: any, i: number) => (
-            <div
-              key={i}
-              className="px-3 py-1 rounded-full bg-red-50 border border-red-200 text-sm"
-            >
-              {tag.label} ({tag.count})
-            </div>
-          ))}
-        </div>
-      </div>
-    )}
+                  {restaurantComplaintTrends?.topTags?.length > 0 && (
+                    <div>
+                      <div className="text-sm text-gray-500 mb-2">
+                        Top Complaint Categories
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {restaurantComplaintTrends.topTags.map(
+                          (tag: any, i: number) => (
+                            <div
+                              key={i}
+                              className="px-3 py-1 rounded-full bg-red-50 border border-red-200 text-sm"
+                            >
+                              {tag?.label || tag?.key || "Category"} (
+                              {tag?.count ?? 0})
+                            </div>
+                          )
+                        )}
+                      </div>
+                    </div>
+                  )}
 
                   {restaurantComplaintTrends?.topPattern?.length > 0 && (
-                <div className="rounded-xl border bg-white p-4">
-                  <div className="text-sm text-gray-500 mb-3">
-                    Top Complaint Patterns
-                  </div>
-
-              {restaurantComplaintTrends?.sources &&
-                Object.keys(restaurantComplaintTrends.sources).length > 0 && (
-                  <div className="rounded-xl border bg-white p-4">
-                    <div className="text-sm text-gray-500 mb-3">
-                      Complaint Sources
+                    <div>
+                      <div className="text-sm text-gray-500 mb-2">Top Issues</div>
+                      <div className="space-y-2">
+                        {restaurantComplaintTrends.topPattern.map(
+                          (p: any, i: number) => (
+                            <div
+                              key={i}
+                              className="flex items-center justify-between border rounded-lg p-2 text-sm"
+                            >
+                              <div>
+                                <div className="font-medium">
+                                  {p?.label || p?.pattern || "Pattern"}
+                                </div>
+                                <div className="text-xs text-gray-500">
+                                  {p?.typeLabel || p?.type || "—"}
+                                </div>
+                              </div>
+                              <div className="font-semibold">{p?.count ?? 0}</div>
+                            </div>
+                          )
+                        )}
+                      </div>
                     </div>
+                  )}
 
-                                  {restaurantComplaintTrends?.byTypeSource &&
-                Object.keys(restaurantComplaintTrends.byTypeSource).length > 0 && (
-                  <div className="rounded-xl border bg-white p-4">
-                    <div className="text-sm text-gray-500 mb-3">
-                      Complaint Type by Source
-                    </div>
-
-                    <div className="space-y-3">
-                      {Object.entries(restaurantComplaintTrends.byTypeSource).map(
-                        ([type, sourceMap]: any) => (
-                          <div
-                            key={type}
-                            className="rounded-lg border bg-gray-50 p-3"
-                          >
-                            <div className="font-medium text-sm">
-                              {String(type)
-                                .replace(/_/g, " ")
-                                .toLowerCase()
-                                .replace(/\b\w/g, (c) => c.toUpperCase())}
-                            </div>
-
-                            <div className="mt-2 space-y-1">
-                              {Object.entries(sourceMap || {}).map(
-                                ([source, count]: any) => (
-                                  <div
-                                    key={source}
-                                    className="flex items-center justify-between text-sm"
-                                  >
-                                    <span className="capitalize">{source}</span>
-                                    <span className="font-medium">
-                                      {count ?? 0}
-                                    </span>
-                                  </div>
-                                )
-                              )}
-                            </div>
-                          </div>
-                        )
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                    <div className="space-y-2">
-                      {Object.entries(restaurantComplaintTrends.sources).map(
-                        ([source, count]: any) => (
-                          <div
-                            key={source}
-                            className="flex items-center justify-between rounded-lg border bg-gray-50 p-3"
-                          >
-                            <div className="text-sm capitalize">{source}</div>
-                            <div className="text-lg font-semibold">
-                              {count ?? 0}
-                            </div>
-                          </div>
-                        )
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                  <div className="space-y-2">
-                    {restaurantComplaintTrends.topPattern
-                      .slice(0, 3)
-                      .map((pattern: any, i: number) => (
-                        <div
-                          key={i}
-                          className="flex items-center justify-between rounded-lg border bg-gray-50 p-3"
-                        >
-                          <div>
-                            <div className="font-medium text-sm">
-                              {pattern?.label || pattern?.pattern || "Pattern"}
-                            </div>
-                            <div className="text-xs text-gray-500 mt-1">
-                              {pattern?.typeLabel || pattern?.type || "—"}
-                            </div>
-                          </div>
-
-                          <div className="text-lg font-semibold">
-                            {pattern?.count ?? 0}
-                          </div>
-                        </div>
-                      ))}
+                  <div className="text-xs text-gray-500">
+                    {restaurantComplaintTrends?.totals?.matchedItems || 0} total
+                    complaint matches across{" "}
+                    {restaurantComplaintTrends?.totals?.uniqueTypes || 0} categories
                   </div>
                 </div>
               )}
-
-    {/* Pattern Breakdown */}
-    {restaurantComplaintTrends?.topPattern?.length > 0 && (
-      <div>
-        <div className="text-sm text-gray-500 mb-2">Top Issues</div>
-        <div className="space-y-2">
-          {restaurantComplaintTrends.topPattern.map((p: any, i: number) => (
-            <div
-              key={i}
-              className="flex items-center justify-between border rounded-lg p-2 text-sm"
-            >
-              <div>
-                <div className="font-medium">{p.patternLabel}</div>
-                <div className="text-xs text-gray-500">{p.typeLabel}</div>
-              </div>
-              <div className="font-semibold">{p.count}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-    )}
-
-    {/* Totals */}
-    <div className="text-xs text-gray-500">
-      {restaurantComplaintTrends?.totals?.matchedItems || 0} total complaint matches across{" "}
-      {restaurantComplaintTrends?.totals?.uniqueTypes || 0} categories
-    </div>
-  </div>
-)}
 
               <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
                 <div className="text-sm font-medium text-blue-900">
                   Weekly Change Signal
                 </div>
                 <div className="text-sm text-blue-800 mt-1">
-                  {restaurantPhase2?.narrative?.whatChangedThisWeek || "No major weekly change detected."}
+                  {restaurantPhase2?.narrative?.whatChangedThisWeek ||
+                    "No major weekly change detected."}
                 </div>
               </div>
 
@@ -1480,13 +1493,24 @@ export default function AssistantDashboardVapi({
                   {(restaurantPhase2?.narrative?.topRisks || []).map(
                     (x: any, i: number) => (
                       <div key={i} className="rounded-xl border p-3 bg-gray-50">
-                        <div className="font-medium">{x?.theme || "Risk"}</div>
+                        <div className="font-medium">
+                          {x?.risk || x?.theme || "Risk"}
+                        </div>
                         <div className="text-sm text-gray-700 mt-1">
                           {x?.impact || "—"}
                         </div>
-                        <div className="text-xs text-gray-500 mt-1">
-                          {x?.evidence || "—"}
-                        </div>
+
+                        {Array.isArray(x?.evidence) ? (
+                          <div className="text-xs text-gray-500 mt-2 space-y-1">
+                            {x.evidence.map((ev: any, j: number) => (
+                              <div key={j}>{typeof ev === "string" ? ev : "—"}</div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="text-xs text-gray-500 mt-1">
+                            {x?.evidence || "—"}
+                          </div>
+                        )}
                       </div>
                     )
                   )}
@@ -1495,20 +1519,35 @@ export default function AssistantDashboardVapi({
 
               <div>
                 <div className="font-medium mb-2">Top Fixes (No Capex)</div>
-
                 <div className="space-y-3">
                   {(restaurantPhase2?.narrative?.topFixesNoCapex || []).map(
                     (x: any, i: number) => (
                       <div key={i} className="rounded-lg border p-3 bg-gray-50">
-                        <div className="font-medium">{x?.theme || "Fix"}</div>
-
-                        <div className="text-sm text-gray-700 mt-1">
-                          {x?.impact || ""}
+                        <div className="font-medium">
+                          {x?.fix || x?.theme || "Fix"}
                         </div>
 
-                        <div className="text-xs text-gray-500 mt-1">
-                          {x?.evidence || ""}
-                        </div>
+                        {Array.isArray(x?.targets) ? (
+                          <div className="text-sm text-gray-700 mt-2">
+                            Targets: {x.targets.join(" · ")}
+                          </div>
+                        ) : x?.impact ? (
+                          <div className="text-sm text-gray-700 mt-1">
+                            {x.impact}
+                          </div>
+                        ) : null}
+
+                        {Array.isArray(x?.tiesToEvidence) ? (
+                          <div className="text-xs text-gray-500 mt-2 space-y-1">
+                            {x.tiesToEvidence.map((ev: any, j: number) => (
+                              <div key={j}>{typeof ev === "string" ? ev : "—"}</div>
+                            ))}
+                          </div>
+                        ) : x?.evidence ? (
+                          <div className="text-xs text-gray-500 mt-1">
+                            {x.evidence}
+                          </div>
+                        ) : null}
                       </div>
                     )
                   )}
@@ -1518,23 +1557,30 @@ export default function AssistantDashboardVapi({
               <div>
                 <div className="font-medium mb-2">Rising Themes</div>
                 <div className="space-y-3">
-                  {(restaurantPhase2?.trend?.risingThemes || []).map(
-                    (t: any, i: number) => (
-                      <div key={i} className="rounded-xl border p-3 bg-gray-50">
-                        <div className="font-medium">
-                          {t?.title || t?.themeId || "Theme"}
+                  {(restaurantPhase2?.trend?.risingThemes || []).length === 0 ? (
+                    <div className="rounded-xl border p-3 bg-gray-50 text-sm text-gray-500">
+                      No rising themes detected.
+                    </div>
+                  ) : (
+                    (restaurantPhase2?.trend?.risingThemes || []).map(
+                      (t: any, i: number) => (
+                        <div key={i} className="rounded-xl border p-3 bg-gray-50">
+                          <div className="font-medium">
+                            {t?.title || t?.themeId || "Theme"}
+                          </div>
+                          <div className="text-sm text-gray-600 mt-1">
+                            Mentions: {t?.mentions ?? 0} · Last 7d:{" "}
+                            {t?.mentionsLast7d ?? 0} · Prior:{" "}
+                            {t?.mentionsPrior23d ?? 0}
+                          </div>
                         </div>
-                        <div className="text-sm text-gray-600 mt-1">
-                          Mentions: {t?.mentions ?? 0} · Last 7d:{" "}
-                          {t?.mentionsLast7d ?? 0} · Prior:{" "}
-                          {t?.mentionsPrior23d ?? 0}
-                        </div>
-                      </div>
+                      )
                     )
                   )}
                 </div>
               </div>
 
+              {/* Existing older complaint trends section kept, but updated to new structure */}
               <div>
                 <div className="font-medium mb-2">Complaint Trends</div>
 
@@ -1547,47 +1593,29 @@ export default function AssistantDashboardVapi({
                     <div className="grid sm:grid-cols-3 gap-3">
                       <div className="rounded-xl border p-3 bg-gray-50">
                         <div className="text-sm text-gray-500">
-                          Total Complaint Signals
+                          Matched Complaint Signals
                         </div>
                         <div className="font-medium mt-1">
-                          {restaurantComplaintTrends?.totals?.all ?? 0}
+                          {restaurantComplaintTrends?.totals?.matchedItems ?? 0}
                         </div>
                       </div>
 
                       <div className="rounded-xl border p-3 bg-gray-50">
                         <div className="text-sm text-gray-500">
-                          Voice Complaints
+                          Unique Complaint Types
                         </div>
                         <div className="font-medium mt-1">
-                          {restaurantComplaintTrends?.totals?.voice ?? 0}
+                          {restaurantComplaintTrends?.totals?.uniqueTypes ?? 0}
                         </div>
                       </div>
 
                       <div className="rounded-xl border p-3 bg-gray-50">
                         <div className="text-sm text-gray-500">
-                          Review Complaints
+                          Unique Complaint Patterns
                         </div>
                         <div className="font-medium mt-1">
-                          {restaurantComplaintTrends?.totals?.reviews ?? 0}
+                          {restaurantComplaintTrends?.totals?.uniquePatterns ?? 0}
                         </div>
-                      </div>
-                    </div>
-
-                    <div className="rounded-xl border p-3 bg-gray-50">
-                      <div className="text-sm text-gray-500">Last Updated</div>
-                      <div className="font-medium mt-1">
-                        {restaurantComplaintTrends?.lastUpdatedMs
-                          ? new Date(
-                              restaurantComplaintTrends.lastUpdatedMs
-                            ).toLocaleString()
-                          : "—"}
-                      </div>
-                    </div>
-
-                    <div className="rounded-xl border p-3 bg-gray-50">
-                      <div className="text-sm text-gray-500">Window</div>
-                      <div className="font-medium mt-1">
-                        {restaurantComplaintTrends?.windowDays ?? 30} days
                       </div>
                     </div>
 
@@ -1596,31 +1624,29 @@ export default function AssistantDashboardVapi({
                         Complaint Counts
                       </div>
                       <div className="space-y-2">
-                        <div className="flex items-center justify-between text-sm">
-                          <span>Cold Food</span>
-                          <span className="font-medium">
-                            {restaurantComplaintTrends?.counts?.cold_food ?? 0}
-                          </span>
-                        </div>
-                        <div className="flex items-center justify-between text-sm">
-                          <span>Delivery Delay</span>
-                          <span className="font-medium">
-                            {restaurantComplaintTrends?.counts?.delivery_delay ??
-                              0}
-                          </span>
-                        </div>
-                        <div className="flex items-center justify-between text-sm">
-                          <span>Wrong Order</span>
-                          <span className="font-medium">
-                            {restaurantComplaintTrends?.counts?.wrong_order ?? 0}
-                          </span>
-                        </div>
-                        <div className="flex items-center justify-between text-sm">
-                          <span>Rude Staff</span>
-                          <span className="font-medium">
-                            {restaurantComplaintTrends?.counts?.rude_staff ?? 0}
-                          </span>
-                        </div>
+                        {Object.keys(restaurantComplaintTrends?.counts || {}).length ===
+                        0 ? (
+                          <div className="text-sm text-gray-500">
+                            No complaint counts yet.
+                          </div>
+                        ) : (
+                          Object.entries(restaurantComplaintTrends?.counts || {}).map(
+                            ([key, count]: any) => (
+                              <div
+                                key={key}
+                                className="flex items-center justify-between text-sm"
+                              >
+                                <span>
+                                  {String(key)
+                                    .replace(/_/g, " ")
+                                    .toLowerCase()
+                                    .replace(/\b\w/g, (c) => c.toUpperCase())}
+                                </span>
+                                <span className="font-medium">{count ?? 0}</span>
+                              </div>
+                            )
+                          )
+                        )}
                       </div>
                     </div>
 
@@ -1629,30 +1655,24 @@ export default function AssistantDashboardVapi({
                         Complaint Sources
                       </div>
                       <div className="space-y-2">
-                        <div className="flex items-center justify-between text-sm">
-                          <span>Phone Calls</span>
-                          <span className="font-medium">
-                            {restaurantComplaintTrends?.sources?.voice ?? 0}
-                          </span>
-                        </div>
-                        <div className="flex items-center justify-between text-sm">
-                          <span>Google Reviews</span>
-                          <span className="font-medium">
-                            {restaurantComplaintTrends?.sources?.google ?? 0}
-                          </span>
-                        </div>
-                        <div className="flex items-center justify-between text-sm">
-                          <span>Uber Eats Reviews</span>
-                          <span className="font-medium">
-                            {restaurantComplaintTrends?.sources?.ubereats ?? 0}
-                          </span>
-                        </div>
-                        <div className="flex items-center justify-between text-sm">
-                          <span>Grubhub Reviews</span>
-                          <span className="font-medium">
-                            {restaurantComplaintTrends?.sources?.grubhub ?? 0}
-                          </span>
-                        </div>
+                        {Object.keys(restaurantComplaintTrends?.sources || {}).length ===
+                        0 ? (
+                          <div className="text-sm text-gray-500">
+                            No complaint sources yet.
+                          </div>
+                        ) : (
+                          Object.entries(restaurantComplaintTrends?.sources || {}).map(
+                            ([source, count]: any) => (
+                              <div
+                                key={source}
+                                className="flex items-center justify-between text-sm"
+                              >
+                                <span className="capitalize">{source}</span>
+                                <span className="font-medium">{count ?? 0}</span>
+                              </div>
+                            )
+                          )
+                        )}
                       </div>
                     </div>
 
@@ -1662,89 +1682,41 @@ export default function AssistantDashboardVapi({
                       </div>
 
                       <div className="space-y-3 text-sm">
-                        <div>
-                          <div className="font-medium">Cold Food</div>
-                          <div className="text-gray-600 mt-1">
-                            Phone:{" "}
-                            {restaurantComplaintTrends?.byTypeSource?.cold_food
-                              ?.voice ?? 0}
-                            {" · "}
-                            Google:{" "}
-                            {restaurantComplaintTrends?.byTypeSource?.cold_food
-                              ?.google ?? 0}
-                            {" · "}
-                            Uber Eats:{" "}
-                            {restaurantComplaintTrends?.byTypeSource?.cold_food
-                              ?.ubereats ?? 0}
-                            {" · "}
-                            Grubhub:{" "}
-                            {restaurantComplaintTrends?.byTypeSource?.cold_food
-                              ?.grubhub ?? 0}
+                        {Object.keys(
+                          restaurantComplaintTrends?.byTypeSource || {}
+                        ).length === 0 ? (
+                          <div className="text-sm text-gray-500">
+                            No complaint type-by-source data yet.
                           </div>
-                        </div>
-
-                        <div>
-                          <div className="font-medium">Delivery Delay</div>
-                          <div className="text-gray-600 mt-1">
-                            Phone:{" "}
-                            {restaurantComplaintTrends?.byTypeSource
-                              ?.delivery_delay?.voice ?? 0}
-                            {" · "}
-                            Google:{" "}
-                            {restaurantComplaintTrends?.byTypeSource
-                              ?.delivery_delay?.google ?? 0}
-                            {" · "}
-                            Uber Eats:{" "}
-                            {restaurantComplaintTrends?.byTypeSource
-                              ?.delivery_delay?.ubereats ?? 0}
-                            {" · "}
-                            Grubhub:{" "}
-                            {restaurantComplaintTrends?.byTypeSource
-                              ?.delivery_delay?.grubhub ?? 0}
-                          </div>
-                        </div>
-
-                        <div>
-                          <div className="font-medium">Wrong Order</div>
-                          <div className="text-gray-600 mt-1">
-                            Phone:{" "}
-                            {restaurantComplaintTrends?.byTypeSource
-                              ?.wrong_order?.voice ?? 0}
-                            {" · "}
-                            Google:{" "}
-                            {restaurantComplaintTrends?.byTypeSource
-                              ?.wrong_order?.google ?? 0}
-                            {" · "}
-                            Uber Eats:{" "}
-                            {restaurantComplaintTrends?.byTypeSource
-                              ?.wrong_order?.ubereats ?? 0}
-                            {" · "}
-                            Grubhub:{" "}
-                            {restaurantComplaintTrends?.byTypeSource
-                              ?.wrong_order?.grubhub ?? 0}
-                          </div>
-                        </div>
-
-                        <div>
-                          <div className="font-medium">Rude Staff</div>
-                          <div className="text-gray-600 mt-1">
-                            Phone:{" "}
-                            {restaurantComplaintTrends?.byTypeSource
-                              ?.rude_staff?.voice ?? 0}
-                            {" · "}
-                            Google:{" "}
-                            {restaurantComplaintTrends?.byTypeSource
-                              ?.rude_staff?.google ?? 0}
-                            {" · "}
-                            Uber Eats:{" "}
-                            {restaurantComplaintTrends?.byTypeSource
-                              ?.rude_staff?.ubereats ?? 0}
-                            {" · "}
-                            Grubhub:{" "}
-                            {restaurantComplaintTrends?.byTypeSource
-                              ?.rude_staff?.grubhub ?? 0}
-                          </div>
-                        </div>
+                        ) : (
+                          Object.entries(
+                            restaurantComplaintTrends?.byTypeSource || {}
+                          ).map(([type, sourceMap]: any) => (
+                            <div key={type}>
+                              <div className="font-medium">
+                                {String(type)
+                                  .replace(/_/g, " ")
+                                  .toLowerCase()
+                                  .replace(/\b\w/g, (c) => c.toUpperCase())}
+                              </div>
+                              <div className="text-gray-600 mt-1 space-y-1">
+                                {Object.entries(sourceMap || {}).map(
+                                  ([source, count]: any) => (
+                                    <div
+                                      key={source}
+                                      className="flex items-center justify-between"
+                                    >
+                                      <span className="capitalize">{source}</span>
+                                      <span className="font-medium">
+                                        {count ?? 0}
+                                      </span>
+                                    </div>
+                                  )
+                                )}
+                              </div>
+                            </div>
+                          ))
+                        )}
                       </div>
                     </div>
 
@@ -1763,7 +1735,7 @@ export default function AssistantDashboardVapi({
                                 key={i}
                                 className="flex items-center justify-between text-sm"
                               >
-                                <span>{tag?.tag || "—"}</span>
+                                <span>{tag?.label || tag?.key || "—"}</span>
                                 <span className="font-medium">
                                   {tag?.count ?? 0}
                                 </span>
@@ -1779,59 +1751,36 @@ export default function AssistantDashboardVapi({
                         Top Pattern
                       </div>
 
-                      {!restaurantComplaintTrends?.topPattern ? (
+                      {(restaurantComplaintTrends?.topPattern || []).length === 0 ? (
                         <div className="text-sm text-gray-500">
                           No complaint pattern detected yet.
                         </div>
                       ) : (
-                        <div className="space-y-3">
-                          <div>
-                            <div className="font-medium">
-                              {restaurantComplaintTrends?.topPattern?.title ||
-                                "—"}
-                            </div>
-                            <div className="text-sm text-gray-700 mt-1">
-                              {restaurantComplaintTrends?.topPattern?.summary ||
-                                "—"}
-                            </div>
-                          </div>
-
-                          <div className="text-xs text-gray-500">
-                            Count:{" "}
-                            {restaurantComplaintTrends?.topPattern?.count ?? 0}
-                            {" · "}
-                            Sources:{" "}
-                            {restaurantComplaintTrends?.topPattern?.sourceMix ||
-                              "—"}
-                          </div>
-
-                          <div>
-                            <div className="text-sm text-gray-500 mb-1">
-                              Evidence
-                            </div>
-                            <div className="space-y-2">
-                              {(restaurantComplaintTrends?.topPattern
-                                ?.examples || []).length === 0 ? (
-                                <div className="text-sm text-gray-500">
-                                  No evidence examples yet.
-                                </div>
-                              ) : (
-                                (
-                                  restaurantComplaintTrends?.topPattern
-                                    ?.examples || []
-                                ).map((ex: any, i: number) => (
-                                  <div
-                                    key={i}
-                                    className="rounded-lg border bg-white p-2 text-sm text-gray-700"
-                                  >
-                                    {typeof ex === "string"
-                                      ? ex
-                                      : ex?.text || "—"}
+                        <div className="space-y-2">
+                          {(restaurantComplaintTrends?.topPattern || []).map(
+                            (pattern: any, i: number) => (
+                              <div
+                                key={i}
+                                className="rounded-lg border bg-white p-2"
+                              >
+                                <div className="flex items-center justify-between">
+                                  <div>
+                                    <div className="font-medium text-sm">
+                                      {pattern?.label ||
+                                        pattern?.pattern ||
+                                        "Pattern"}
+                                    </div>
+                                    <div className="text-xs text-gray-500">
+                                      {pattern?.typeLabel || pattern?.type || "—"}
+                                    </div>
                                   </div>
-                                ))
-                              )}
-                            </div>
-                          </div>
+                                  <div className="font-medium">
+                                    {pattern?.count ?? 0}
+                                  </div>
+                                </div>
+                              </div>
+                            )
+                          )}
                         </div>
                       )}
                     </div>
