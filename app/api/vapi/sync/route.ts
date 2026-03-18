@@ -22,7 +22,7 @@ function getAdminRtdb() {
     process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL ||
     "https://askaida-dashboard-default-rtdb.firebaseio.com";
 
- const existing = admin.apps.find((app: any) => app && app.name === "rtdb");
+  const existing = admin.apps.find((app: any) => app && app.name === "rtdb");
 
   if (existing) {
     return admin.database(existing);
@@ -39,48 +39,56 @@ function getAdminRtdb() {
   return admin.database(rtdbApp);
 }
 
+function getField(...values: any[]) {
+  for (const v of values) {
+    if (v !== undefined && v !== null) return v;
+  }
+  return null;
+}
+
 function toCallRow(x: AnyObj, assistantIdFallback: string) {
-  const id = x?.id ?? x?.callId ?? null;
+  const id = getField(x?.id, x?.callId, x?.call?.id);
 
-  const startedAtRaw =
-    x?.startedAt ??
-    x?.startTime ??
-    x?.createdAt ??
-    x?.message?.startedAt ??
-    x?.call?.startedAt ??
-    null;
+  const startedAtRaw = getField(
+    x?.startedAt,
+    x?.startTime,
+    x?.createdAt,
+    x?.call?.startedAt,
+    x?.message?.startedAt
+  );
 
-  const endedAtRaw =
-    x?.endedAt ??
-    x?.endTime ??
-    x?.message?.endedAt ??
-    x?.call?.endedAt ??
-    null;
+  const endedAtRaw = getField(
+    x?.endedAt,
+    x?.endTime,
+    x?.call?.endedAt,
+    x?.message?.endedAt
+  );
 
   const startedAt = asDate(startedAtRaw);
   const endedAt = asDate(endedAtRaw);
 
-  const assistantId =
-    x?.assistantId ??
-    x?.assistant?.id ??
-    x?.call?.assistantId ??
-    x?.message?.assistantId ??
-    assistantIdFallback;
+  const assistantId = getField(
+    x?.assistantId,
+    x?.assistant?.id,
+    x?.call?.assistantId,
+    x?.message?.assistantId,
+    assistantIdFallback
+  );
 
-  const from =
-    x?.customer?.number ??
-    x?.from ??
-    x?.phoneNumber?.number ??
-    x?.call?.customer?.number ??
-    x?.message?.customer?.number ??
-    null;
+  const from = getField(
+    x?.customer?.number,
+    x?.from,
+    x?.phoneNumber?.number,
+    x?.call?.customer?.number,
+    x?.message?.customer?.number
+  );
 
-  const to =
-    x?.to ??
-    x?.phoneNumber?.number ??
-    x?.call?.to ??
-    x?.message?.to ??
-    null;
+  const to = getField(
+    x?.to,
+    x?.phoneNumber?.number,
+    x?.call?.to,
+    x?.message?.to
+  );
 
   const durationSeconds =
     typeof x?.durationSeconds === "number"
@@ -89,30 +97,34 @@ function toCallRow(x: AnyObj, assistantIdFallback: string) {
       ? Math.max(0, Math.floor((endedAt.getTime() - startedAt.getTime()) / 1000))
       : null;
 
-  const recordingUrl =
-    x?.recordingUrl ??
-    x?.artifact?.recordingUrl ??
-    x?.media?.recordingUrl ??
-    x?.message?.artifact?.recordingUrl ??
-    null;
+  const recordingUrl = getField(
+    x?.recordingUrl,
+    x?.artifact?.recordingUrl,
+    x?.media?.recordingUrl,
+    x?.message?.artifact?.recordingUrl
+  );
 
-  const transcript =
-    x?.transcript ??
-    x?.artifact?.transcript ??
-    x?.analysis?.transcript ??
-    x?.message?.artifact?.transcript ??
-    x?.message?.analysis?.transcript ??
-    null;
+  const transcript = getField(
+    x?.transcript,
+    x?.artifact?.transcript,
+    x?.analysis?.transcript,
+    x?.message?.artifact?.transcript,
+    x?.message?.analysis?.transcript
+  );
 
   return {
-    id,
-    assistantId,
-    type: x?.type ?? x?.call?.type ?? null,
-    status: x?.status ?? x?.call?.status ?? null,
-    endedReason: x?.endedReason ?? x?.message?.endedReason ?? x?.call?.endedReason ?? null,
+    id: id ? String(id) : null,
+    assistantId: assistantId ? String(assistantId) : null,
+    type: getField(x?.type, x?.call?.type),
+    status: getField(x?.status, x?.call?.status),
+    endedReason: getField(
+      x?.endedReason,
+      x?.message?.endedReason,
+      x?.call?.endedReason
+    ),
 
-    from,
-    to,
+    from: from ? String(from) : null,
+    to: to ? String(to) : null,
 
     startTime: startedAt,
     endTime: endedAt,
@@ -120,9 +132,8 @@ function toCallRow(x: AnyObj, assistantIdFallback: string) {
 
     durationSeconds,
     recordingUrl: recordingUrl ? String(recordingUrl) : null,
-    transcript: clip(transcript, 20000), // avoid giant docs
+    transcript: clip(transcript, 20000),
 
-    // no raw payload in bulk sync
     updatedAt: new Date(),
     createdAt: new Date(),
   };
@@ -133,6 +144,7 @@ function pickItems(payload: any): any[] {
   if (Array.isArray(payload?.results)) return payload.results;
   if (Array.isArray(payload?.data)) return payload.data;
   if (Array.isArray(payload?.calls)) return payload.calls;
+  if (Array.isArray(payload?.items)) return payload.items;
   return [];
 }
 
@@ -175,10 +187,16 @@ function classifyTranscript(transcript: string | null) {
     "not happy",
     "disappointed",
     "rude",
+    "owner",
+    "manager",
   ];
 
-  const strongMatches = strongComplaintPhrases.filter((phrase) => text.includes(phrase));
-  const weakMatches = weakComplaintPhrases.filter((phrase) => text.includes(phrase));
+  const strongMatches = strongComplaintPhrases.filter((phrase) =>
+    text.includes(phrase)
+  );
+  const weakMatches = weakComplaintPhrases.filter((phrase) =>
+    text.includes(phrase)
+  );
 
   const containsComplaint =
     strongMatches.length > 0 || weakMatches.length >= 2;
@@ -198,8 +216,7 @@ function classifyTranscript(transcript: string | null) {
     text.includes("speak to the manager") ||
     text.includes("speak to a manager");
 
-  const isOwnerRequest =
-    text.includes("speak to the owner");
+  const isOwnerRequest = text.includes("speak to the owner");
 
   let callType = "other";
 
@@ -224,7 +241,7 @@ function classifyTranscript(transcript: string | null) {
 async function getRestaurantCodeForAssistant(assistantId: string | null) {
   if (!assistantId) return null;
 
-  const snap = await getAdminRtdb().ref(`restaurants`).get();
+  const snap = await getAdminRtdb().ref("restaurants").get();
   const restaurants = snap.val() || {};
 
   for (const [restaurantCode, data] of Object.entries(restaurants)) {
@@ -270,9 +287,13 @@ async function writeInChunks(rows: any[], chunkSize = 50) {
         );
 
         if (restaurantCode) {
-              await getAdminRtdb()
-              .ref(`restaurants/${restaurantCode}/reputationSignals/voiceComplaints/items/${String(r.id)}`)
-              .update({
+          await getAdminRtdb()
+            .ref(
+              `restaurants/${restaurantCode}/reputationSignals/voiceComplaints/items/${String(
+                r.id
+              )}`
+            )
+            .update({
               source: "voice",
               channel: "phone",
               category: analysis.callType,
@@ -302,12 +323,18 @@ export async function GET(req: NextRequest) {
     const end = searchParams.get("end");
 
     if (!assistantId) {
-      return NextResponse.json({ error: "assistantId required" }, { status: 400 });
+      return NextResponse.json(
+        { error: "assistantId required" },
+        { status: 400 }
+      );
     }
 
     const apiKey = process.env.VAPI_API_KEY;
     if (!apiKey) {
-      return NextResponse.json({ error: "VAPI_API_KEY missing" }, { status: 500 });
+      return NextResponse.json(
+        { error: "VAPI_API_KEY missing" },
+        { status: 500 }
+      );
     }
 
     const callsQS = new URLSearchParams();
@@ -316,7 +343,8 @@ export async function GET(req: NextRequest) {
     if (start) callsQS.set("createdAtGe", start);
     if (end) callsQS.set("createdAtLe", end);
 
-    const callsUrl = `https://api.vapi.ai/call?${callsQS.toString()}`;
+    // Current documented list calls endpoint.
+    const callsUrl = `https://api.vapi.ai/v2/call?${callsQS.toString()}`;
 
     const callsRes = await fetch(callsUrl, {
       method: "GET",
@@ -333,30 +361,47 @@ export async function GET(req: NextRequest) {
       console.error("VAPI CALLS ERROR BODY:", text);
 
       return NextResponse.json(
-        { error: "Failed to fetch calls from Vapi", status: callsRes.status, body: text },
+        {
+          error: "Failed to fetch calls from Vapi",
+          status: callsRes.status,
+          body: text,
+        },
         { status: 502 }
       );
     }
 
     const payload = await callsRes.json().catch(() => ({}));
+    const apiItems = pickItems(payload);
 
     console.log("VAPI CALLS URL:", callsUrl);
-    console.log("VAPI CALLS TOP-LEVEL KEYS:", payload && typeof payload === "object" ? Object.keys(payload) : []);
-    const apiItems = pickItems(payload);
+    console.log(
+      "VAPI CALLS TOP-LEVEL KEYS:",
+      payload && typeof payload === "object" ? Object.keys(payload) : []
+    );
     console.log("VAPI CALLS ITEM COUNT:", apiItems.length);
+    console.log(
+      "VAPI FIRST ITEM:",
+      JSON.stringify(apiItems[0] || null, null, 2)
+    );
 
     const startDate = start ? asDate(start) : null;
     const endDate = end ? asDate(end) : null;
 
-    let rows = apiItems
-      .map((x) => toCallRow(x, assistantId))
-      .filter((r) => !!r.id);
+    const mapped = apiItems.map((x) => toCallRow(x, assistantId));
+
+    console.log(
+      "FIRST MAPPED ROW:",
+      JSON.stringify(mapped[0] || null, null, 2)
+    );
+
+    let rows = mapped.filter((r) => !!r.id);
 
     rows = rows.filter((r) => r.assistantId === assistantId);
 
     if (startDate) {
       rows = rows.filter((r) => r.startTime && r.startTime >= startDate);
     }
+
     if (endDate) {
       rows = rows.filter((r) => r.startTime && r.startTime <= endDate);
     }
@@ -372,6 +417,8 @@ export async function GET(req: NextRequest) {
         ok: true,
         fetched: apiItems.length,
         upserted: rows.length,
+        sampleReturnedId: apiItems?.[0]?.id || null,
+        sampleMappedId: mapped?.[0]?.id || null,
       },
       { status: 200 }
     );

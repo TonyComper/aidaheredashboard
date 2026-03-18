@@ -2745,12 +2745,22 @@ async function buildRestaurantReputationPhase2Report({
     windowDays: 30,
   });
 
+  console.log(
+  "voiceComplaints sample:",
+  JSON.stringify((voiceComplaints || []).slice(0, 3), null, 2)
+);
+
   const complaintTrends = buildRestaurantComplaintTrends({
     reviewItems: (norm || []).map((r) => ({
       text: r?.text || "",
     })),
-    callItems: (voiceComplaints || []).map((c) => ({
-      transcript: c?.transcript || c?.summary || "",
+  callItems: (voiceComplaints || []).map((c) => ({
+    transcript:
+      c?.text ||
+      c?.transcript ||
+      c?.summary ||
+      c?.complaintText ||
+      "",
     })),
     messageItems: [],
   });
