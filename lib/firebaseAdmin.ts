@@ -32,6 +32,17 @@ const adminApp = getFirebaseAdminApp();
 
 export const adminDb = admin.firestore(adminApp);
 export const adminAuth = admin.auth(adminApp);
-export const adminRtdb = admin.database(adminApp);
+
+export function getAdminRtdb() {
+  const databaseURL =
+    process.env.FIREBASE_DATABASE_URL ||
+    process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL;
+
+  if (!databaseURL) {
+    throw new Error("Can't determine Firebase Database URL.");
+  }
+
+  return admin.database(adminApp);
+}
 
 export default adminApp;

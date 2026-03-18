@@ -1,6 +1,6 @@
 // app/api/vapi/sync/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { adminDb } from "@/lib/firebaseAdmin";
+import { adminDb, getAdminRtdb } from "@/lib/firebaseAdmin";
 import admin from "firebase-admin";
 
 type AnyObj = Record<string, any>;
@@ -15,28 +15,6 @@ function clip(value: any, max = 20000): string | null {
   if (value == null) return null;
   const s = String(value);
   return s.length > max ? s.slice(0, max) : s;
-}
-
-function getAdminRtdb() {
-  const dbUrl =
-    process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL ||
-    "https://askaida-dashboard-default-rtdb.firebaseio.com";
-
-  const existing = admin.apps.find((app: any) => app && app.name === "rtdb");
-
-  if (existing) {
-    return admin.database(existing);
-  }
-
-  const rtdbApp = admin.initializeApp(
-    {
-      credential: admin.app().options.credential,
-      databaseURL: dbUrl,
-    },
-    "rtdb"
-  );
-
-  return admin.database(rtdbApp);
 }
 
 function getField(...values: any[]) {
