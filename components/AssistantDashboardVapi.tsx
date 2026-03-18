@@ -360,19 +360,27 @@ export default function AssistantDashboardVapi({
   // -------- SYNC (server route) ----------
   async function syncNow() {
     setSyncing(true);
+    setError(null);
+
     try {
       const params = new URLSearchParams({
         assistantId,
         start: start.toISOString(),
         end: end.toISOString(),
       });
-      await fetch(`/api/vapi/sync?${params}`, { method: "GET" });
-    } catch {
-      // ignore
+
+      const res = await fetch(`/api/vapi/sync?${params}`, { method: "GET" });
+      const json = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        throw new Error(json?.error || "Sync failed.");
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Sync failed.");
     } finally {
       setSyncing(false);
-      void loadData();
-      void loadBillingUsage();
+      await loadData();
+      await loadBillingUsage();
 
       const fresh = await loadBillingPlan();
       if (view === "invoice") {
@@ -1555,6 +1563,64 @@ export default function AssistantDashboardVapi({
               </div>
 
               <div>
+                <div className="font-medium mb-2">
+                  Recommended Actions — Next 7 Days
+                </div>
+                <div className="space-y-3">
+                  {(restaurantPhase2?.narrative?.recommendedOwnerActions7d || []).length === 0 ? (
+                    <div className="rounded-xl border p-3 bg-gray-50 text-sm text-gray-500">
+                      No 7-day actions available.
+                    </div>
+                  ) : (
+                    (restaurantPhase2?.narrative?.recommendedOwnerActions7d || []).map(
+                      (x: any, i: number) => (
+                        <div key={i} className="rounded-xl border p-3 bg-white">
+                          <div className="font-medium">
+                            {x?.action || `Action ${i + 1}`}
+                          </div>
+                          <div className="text-sm text-gray-700 mt-1">
+                            {x?.details || x?.why || "—"}
+                          </div>
+                          <div className="text-xs text-gray-500 mt-1">
+                            Success Metric: {x?.successMetric || x?.expectedOutcome || "—"}
+                          </div>
+                        </div>
+                      )
+                    )
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <div className="font-medium mb-2">
+                  Recommended Actions — Next 30 Days
+                </div>
+                <div className="space-y-3">
+                  {(restaurantPhase2?.narrative?.recommendedOwnerActions30d || []).length === 0 ? (
+                    <div className="rounded-xl border p-3 bg-gray-50 text-sm text-gray-500">
+                      No 30-day actions available.
+                    </div>
+                  ) : (
+                    (restaurantPhase2?.narrative?.recommendedOwnerActions30d || []).map(
+                      (x: any, i: number) => (
+                        <div key={i} className="rounded-xl border p-3 bg-white">
+                          <div className="font-medium">
+                            {x?.action || `Action ${i + 1}`}
+                          </div>
+                          <div className="text-sm text-gray-700 mt-1">
+                            {x?.details || x?.why || "—"}
+                          </div>
+                          <div className="text-xs text-gray-500 mt-1">
+                            Success Metric: {x?.successMetric || x?.expectedOutcome || "—"}
+                          </div>
+                        </div>
+                      )
+                    )
+                  )}
+                </div>
+              </div>
+
+              <div>
                 <div className="font-medium mb-2">Rising Themes</div>
                 <div className="space-y-3">
                   {(restaurantPhase2?.trend?.risingThemes || []).length === 0 ? (
@@ -1580,213 +1646,12 @@ export default function AssistantDashboardVapi({
                 </div>
               </div>
 
-              {/* Existing older complaint trends section kept, but updated to new structure */}
-              <div>
-                <div className="font-medium mb-2">Complaint Trends</div>
-
-                {!restaurantComplaintTrends ? (
-                  <div className="rounded-xl border p-3 bg-gray-50 text-sm text-gray-500">
-                    No complaint trend data yet.
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    <div className="grid sm:grid-cols-3 gap-3">
-                      <div className="rounded-xl border p-3 bg-gray-50">
-                        <div className="text-sm text-gray-500">
-                          Matched Complaint Signals
-                        </div>
-                        <div className="font-medium mt-1">
-                          {restaurantComplaintTrends?.totals?.matchedItems ?? 0}
-                        </div>
-                      </div>
-
-                      <div className="rounded-xl border p-3 bg-gray-50">
-                        <div className="text-sm text-gray-500">
-                          Unique Complaint Types
-                        </div>
-                        <div className="font-medium mt-1">
-                          {restaurantComplaintTrends?.totals?.uniqueTypes ?? 0}
-                        </div>
-                      </div>
-
-                      <div className="rounded-xl border p-3 bg-gray-50">
-                        <div className="text-sm text-gray-500">
-                          Unique Complaint Patterns
-                        </div>
-                        <div className="font-medium mt-1">
-                          {restaurantComplaintTrends?.totals?.uniquePatterns ?? 0}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="rounded-xl border p-3 bg-gray-50">
-                      <div className="text-sm text-gray-500 mb-2">
-                        Complaint Counts
-                      </div>
-                      <div className="space-y-2">
-                        {Object.keys(restaurantComplaintTrends?.counts || {}).length ===
-                        0 ? (
-                          <div className="text-sm text-gray-500">
-                            No complaint counts yet.
-                          </div>
-                        ) : (
-                          Object.entries(restaurantComplaintTrends?.counts || {}).map(
-                            ([key, count]: any) => (
-                              <div
-                                key={key}
-                                className="flex items-center justify-between text-sm"
-                              >
-                                <span>
-                                  {String(key)
-                                    .replace(/_/g, " ")
-                                    .toLowerCase()
-                                    .replace(/\b\w/g, (c) => c.toUpperCase())}
-                                </span>
-                                <span className="font-medium">{count ?? 0}</span>
-                              </div>
-                            )
-                          )
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="rounded-xl border p-3 bg-gray-50">
-                      <div className="text-sm text-gray-500 mb-2">
-                        Complaint Sources
-                      </div>
-                      <div className="space-y-2">
-                        {Object.keys(restaurantComplaintTrends?.sources || {}).length ===
-                        0 ? (
-                          <div className="text-sm text-gray-500">
-                            No complaint sources yet.
-                          </div>
-                        ) : (
-                          Object.entries(restaurantComplaintTrends?.sources || {}).map(
-                            ([source, count]: any) => (
-                              <div
-                                key={source}
-                                className="flex items-center justify-between text-sm"
-                              >
-                                <span className="capitalize">{source}</span>
-                                <span className="font-medium">{count ?? 0}</span>
-                              </div>
-                            )
-                          )
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="rounded-xl border p-3 bg-gray-50">
-                      <div className="text-sm text-gray-500 mb-2">
-                        Complaint Type by Source
-                      </div>
-
-                      <div className="space-y-3 text-sm">
-                        {Object.keys(
-                          restaurantComplaintTrends?.byTypeSource || {}
-                        ).length === 0 ? (
-                          <div className="text-sm text-gray-500">
-                            No complaint type-by-source data yet.
-                          </div>
-                        ) : (
-                          Object.entries(
-                            restaurantComplaintTrends?.byTypeSource || {}
-                          ).map(([type, sourceMap]: any) => (
-                            <div key={type}>
-                              <div className="font-medium">
-                                {String(type)
-                                  .replace(/_/g, " ")
-                                  .toLowerCase()
-                                  .replace(/\b\w/g, (c) => c.toUpperCase())}
-                              </div>
-                              <div className="text-gray-600 mt-1 space-y-1">
-                                {Object.entries(sourceMap || {}).map(
-                                  ([source, count]: any) => (
-                                    <div
-                                      key={source}
-                                      className="flex items-center justify-between"
-                                    >
-                                      <span className="capitalize">{source}</span>
-                                      <span className="font-medium">
-                                        {count ?? 0}
-                                      </span>
-                                    </div>
-                                  )
-                                )}
-                              </div>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="rounded-xl border p-3 bg-gray-50">
-                      <div className="text-sm text-gray-500">Top Tags</div>
-                      <div className="mt-2 space-y-2">
-                        {(restaurantComplaintTrends?.topTags || []).length ===
-                        0 ? (
-                          <div className="text-sm text-gray-500">
-                            No top tags yet.
-                          </div>
-                        ) : (
-                          (restaurantComplaintTrends?.topTags || []).map(
-                            (tag: any, i: number) => (
-                              <div
-                                key={i}
-                                className="flex items-center justify-between text-sm"
-                              >
-                                <span>{tag?.label || tag?.key || "—"}</span>
-                                <span className="font-medium">
-                                  {tag?.count ?? 0}
-                                </span>
-                              </div>
-                            )
-                          )
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="rounded-xl border p-3 bg-gray-50">
-                      <div className="text-sm text-gray-500 mb-2">
-                        Top Pattern
-                      </div>
-
-                      {(restaurantComplaintTrends?.topPattern || []).length === 0 ? (
-                        <div className="text-sm text-gray-500">
-                          No complaint pattern detected yet.
-                        </div>
-                      ) : (
-                        <div className="space-y-2">
-                          {(restaurantComplaintTrends?.topPattern || []).map(
-                            (pattern: any, i: number) => (
-                              <div
-                                key={i}
-                                className="rounded-lg border bg-white p-2"
-                              >
-                                <div className="flex items-center justify-between">
-                                  <div>
-                                    <div className="font-medium text-sm">
-                                      {pattern?.label ||
-                                        pattern?.pattern ||
-                                        "Pattern"}
-                                    </div>
-                                    <div className="text-xs text-gray-500">
-                                      {pattern?.typeLabel || pattern?.type || "—"}
-                                    </div>
-                                  </div>
-                                  <div className="font-medium">
-                                    {pattern?.count ?? 0}
-                                  </div>
-                                </div>
-                              </div>
-                            )
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
+              {restaurantMeta && (
+                <div className="text-xs text-gray-500">
+                  Reviews stored: {restaurantMeta?.storedReviews ?? "—"} · Text
+                  reviews analyzed: {restaurantMeta?.totalTextReviews ?? "—"}
+                </div>
+              )}
             </div>
           )}
         </div>
