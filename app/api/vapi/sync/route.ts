@@ -325,7 +325,7 @@ export async function GET(req: NextRequest) {
 
     do {
       const callsQS = new URLSearchParams();
-      callsQS.set("limit", "200");
+      callsQS.set("limit", "1000");
       callsQS.set("assistantId", assistantId);
       if (start) callsQS.set("createdAtGe", start);
       if (end) callsQS.set("createdAtLe", end);
