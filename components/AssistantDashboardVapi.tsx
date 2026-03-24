@@ -299,6 +299,10 @@ export default function AssistantDashboardVapi({
   // Data + UI state
   const [loading, setLoading] = useState<boolean>(false);
   const [rows, setRows] = useState<CallRow[]>([]);
+  const displayedRows = useMemo(() => {
+  return rows.slice(0, pageSize);
+}, [rows, pageSize]);
+
   const [error, setError] = useState<string | null>(null);
 
   // Drawer
@@ -414,7 +418,7 @@ export default function AssistantDashboardVapi({
         where("startTime", "<=", Timestamp.fromDate(end))
       );
       const snap = await getDocs(qy);
-      const arr: CallRow[] = snap.docs.slice(0, pageSize).map((d) => {
+      const arr: CallRow[] = snap.docs.map((d) => {
         const data = d.data() as Record<string, unknown>;
         return {
           id: d.id,
@@ -1695,12 +1699,12 @@ export default function AssistantDashboardVapi({
                     </td>
                   </tr>
                 ) : (
-                  rows.map((it) => {
+                displayedRows.map((it) => {
                     const mins = it.durationSeconds
-                      ? Math.round(it.durationSeconds / 60)
-                      : 0;
-                    return (
-                      <tr
+                    ? Math.round(it.durationSeconds / 60)
+                    : 0;
+                  return (
+                    <tr>
                         key={it.id}
                         className="border-b border-slate-100 last:border-0 hover:bg-slate-50/80 transition-colors"
                       >
