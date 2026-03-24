@@ -300,9 +300,8 @@ export default function AssistantDashboardVapi({
   const [loading, setLoading] = useState<boolean>(false);
   const [rows, setRows] = useState<CallRow[]>([]);
   const displayedRows = useMemo(() => {
-  return rows.slice(0, pageSize);
-}, [rows, pageSize]);
-
+    return rows.slice(0, pageSize);
+  }, [rows, pageSize]);
   const [error, setError] = useState<string | null>(null);
 
   // Drawer
@@ -1699,62 +1698,41 @@ export default function AssistantDashboardVapi({
                     </td>
                   </tr>
                 ) : (
+                  <>
+                    {displayedRows.map((it) => {
+                      const mins = it.durationSeconds
+                        ? Math.round(it.durationSeconds / 60)
+                        : 0;
 
-<tbody>
-  {displayedRows.map((it) => {
-    const mins = it.durationSeconds
-      ? Math.round(it.durationSeconds / 60)
-      : 0;
-
-    return (
-      <tr
-        key={it.id}
-        className="border-b border-slate-100 last:border-0 hover:bg-slate-50/80 transition-colors"
-      >
-        <td className="py-2 px-3 whitespace-nowrap text-sm">
-          {fmtDate(it.startTime)}
-        </td>
-        <td className="py-2 px-3 text-sm">{it.from || "—"}</td>
-        <td className="py-2 px-3 text-sm">
-          {fmtTime(it.startTime)}
-        </td>
-        <td className="py-2 px-3 text-sm text-right">
-          {mins} min
-        </td>
-        <td className="py-2 px-3 text-sm text-right">
-          <button
-            className="underline"
-            onClick={() => setDrawerId(it.id)}
-          >
-            View
-          </button>
-        </td>
-      </tr>
-    );
-  })}
-</tbody>
-                        className="border-b border-slate-100 last:border-0 hover:bg-slate-50/80 transition-colors"
-                        <td className="py-2 px-3 whitespace-nowrap text-sm">
-                          {fmtDate(it.startTime)}
-                        </td>
-                        <td className="py-2 px-3 text-sm">{it.from || "—"}</td>
-                        <td className="py-2 px-3 text-sm">
-                          {fmtTime(it.startTime)}
-                        </td>
-                        <td className="py-2 px-3 text-sm text-right">
-                          {mins} min
-                        </td>
-                        <td className="py-2 px-3 text-sm text-right">
-                          <button
-                            className="underline"
-                            onClick={() => setDrawerId(it.id)}
-                          >
-                            View
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })
+                      return (
+                        <tr
+                          key={it.id}
+                          className="border-b border-slate-100 last:border-0 hover:bg-slate-50/80 transition-colors"
+                        >
+                          <td className="py-2 px-3 whitespace-nowrap text-sm">
+                            {fmtDate(it.startTime)}
+                          </td>
+                          <td className="py-2 px-3 text-sm">
+                            {it.from || "—"}
+                          </td>
+                          <td className="py-2 px-3 text-sm">
+                            {fmtTime(it.startTime)}
+                          </td>
+                          <td className="py-2 px-3 text-sm text-right">
+                            {mins} min
+                          </td>
+                          <td className="py-2 px-3 text-sm text-right">
+                            <button
+                              className="underline"
+                              onClick={() => setDrawerId(it.id)}
+                            >
+                              View
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </>
                 )}
               </tbody>
             </table>
