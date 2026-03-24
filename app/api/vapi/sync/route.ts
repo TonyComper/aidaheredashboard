@@ -100,18 +100,14 @@ function toCallRow(x: AnyObj, assistantIdFallback: string) {
       x?.message?.endedReason,
       x?.call?.endedReason
     ),
-
     from: from ? String(from) : null,
     to: to ? String(to) : null,
-
     startTime: startedAt,
     endTime: endedAt,
     callDate: startedAt,
-
     durationSeconds,
     recordingUrl: recordingUrl ? String(recordingUrl) : null,
     transcript: clip(transcript, 20000),
-
     updatedAt: new Date(),
     createdAt: new Date(),
   };
@@ -124,6 +120,17 @@ function pickItems(payload: any): any[] {
   if (Array.isArray(payload?.calls)) return payload.calls;
   if (Array.isArray(payload?.items)) return payload.items;
   return [];
+}
+
+function getNextCursor(payload: any): string | null {
+  return (
+    payload?.nextCursor ||
+    payload?.next_cursor ||
+    payload?.cursor ||
+    payload?.pagination?.nextCursor ||
+    payload?.pagination?.next_cursor ||
+    null
+  );
 }
 
 function classifyTranscript(transcript: string | null) {
@@ -301,79 +308,70 @@ export async function GET(req: NextRequest) {
     const end = searchParams.get("end");
 
     if (!assistantId) {
-      return NextResponse.json(
-        { error: "assistantId required" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "assistantId required" }, { status: 400 });
     }
 
     const apiKey = process.env.VAPI_API_KEY;
     if (!apiKey) {
-      return NextResponse.json(
-        { error: "VAPI_API_KEY missing" },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: "VAPI_API_KEY missing" }, { status: 500 });
     }
-
-    const callsQS = new URLSearchParams();
-    callsQS.set("limit", "200");
-    callsQS.set("assistantId", assistantId);
-    if (start) callsQS.set("createdAtGe", start);
-    if (end) callsQS.set("createdAtLe", end);
-
-    // Current documented list calls endpoint.
-    const callsUrl = `https://api.vapi.ai/v2/call?${callsQS.toString()}`;
-
-    const callsRes = await fetch(callsUrl, {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-      },
-      cache: "no-store",
-    });
-
-    if (!callsRes.ok) {
-      const text = await callsRes.text().catch(() => "");
-      console.error("VAPI CALLS ERROR STATUS:", callsRes.status);
-      console.error("VAPI CALLS ERROR URL:", callsUrl);
-      console.error("VAPI CALLS ERROR BODY:", text);
-
-      return NextResponse.json(
-        {
-          error: "Failed to fetch calls from Vapi",
-          status: callsRes.status,
-          body: text,
-        },
-        { status: 502 }
-      );
-    }
-
-    const payload = await callsRes.json().catch(() => ({}));
-    const apiItems = pickItems(payload);
-
-    console.log("VAPI CALLS URL:", callsUrl);
-    console.log(
-      "VAPI CALLS TOP-LEVEL KEYS:",
-      payload && typeof payload === "object" ? Object.keys(payload) : []
-    );
-    console.log("VAPI CALLS ITEM COUNT:", apiItems.length);
-    console.log(
-      "VAPI FIRST ITEM:",
-      JSON.stringify(apiItems[0] || null, null, 2)
-    );
 
     const startDate = start ? asDate(start) : null;
     const endDate = end ? asDate(end) : null;
 
-    const mapped = apiItems.map((x) => toCallRow(x, assistantId));
+    const allItems: any[] = [];
+    let cursor: string | null = null;
+    let pageCount = 0;
 
-    console.log(
-      "FIRST MAPPED ROW:",
-      JSON.stringify(mapped[0] || null, null, 2)
-    );
+    do {
+      const callsQS = new URLSearchParams();
+      callsQS.set("limit", "200");
+      callsQS.set("assistantId", assistantId);
+      if (start) callsQS.set("createdAtGe", start);
+      if (end) callsQS.set("createdAtLe", end);
+      if (cursor) callsQS.set("cursor", cursor);
+
+      const callsUrl = `https://api.vapi.ai/v2/call?${callsQS.toString()}`;
+
+      const callsRes = await fetch(callsUrl, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+        },
+        cache: "no-store",
+      });
+
+      if (!callsRes.ok) {
+        const text = await callsRes.text().catch(() => "");
+        console.error("VAPI CALLS ERROR STATUS:", callsRes.status);
+        console.error("VAPI CALLS ERROR URL:", callsUrl);
+        console.error("VAPI CALLS ERROR BODY:", text);
+
+        return NextResponse.json(
+          {
+            error: "Failed to fetch calls from Vapi",
+            status: callsRes.status,
+            body: text,
+            pageCount,
+          },
+          { status: 502 }
+        );
+      }
+
+      const payload = await callsRes.json().catch(() => ({}));
+      const pageItems = pickItems(payload);
+      allItems.push(...pageItems);
+      cursor = getNextCursor(payload);
+      pageCount += 1;
+
+      console.log("SYNC PAGE:", pageCount);
+      console.log("SYNC PAGE ITEM COUNT:", pageItems.length);
+      console.log("SYNC NEXT CURSOR:", cursor);
+    } while (cursor);
+
+    const mapped = allItems.map((x) => toCallRow(x, assistantId));
 
     let rows = mapped.filter((r) => !!r.id);
-
     rows = rows.filter((r) => r.assistantId === assistantId);
 
     if (startDate) {
@@ -384,8 +382,6 @@ export async function GET(req: NextRequest) {
       rows = rows.filter((r) => r.startTime && r.startTime <= endDate);
     }
 
-    console.log("SYNC ROW COUNT AFTER LOCAL FILTER:", rows.length);
-
     if (rows.length > 0) {
       await writeInChunks(rows, 50);
     }
@@ -393,9 +389,10 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(
       {
         ok: true,
-        fetched: apiItems.length,
+        fetched: allItems.length,
         upserted: rows.length,
-        sampleReturnedId: apiItems?.[0]?.id || null,
+        pages: pageCount,
+        sampleReturnedId: allItems?.[0]?.id || null,
         sampleMappedId: mapped?.[0]?.id || null,
       },
       { status: 200 }

@@ -60,6 +60,12 @@ const {
 const { defineSecret } = require("firebase-functions/params");
 const { onRequest } = require("firebase-functions/v2/https");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
+const { getUberEatsSource } = require("./lib/getUberEatsSource");
+const { fetchUberEatsReviews } = require("./lib/fetchUberEatsReviews");
+const { waitForApifyRun } = require("./lib/waitForApifyRun");
+const { getApifyDatasetItems } = require("./lib/getApifyDatasetItems");
+const { getNormalizedUberEatsReviews } = require("./lib/getNormalizedUberEatsReviews");
+const { normalizeUberEatsReviews } = require("./lib/normalizeUberEatsReviews");
 const cors = require("cors")({ origin: true });
 
 if (!admin.apps.length) admin.initializeApp();
@@ -3555,6 +3561,7 @@ function buildRestaurantComplaintTrends({ reviews = [], voiceComplaints = [] }) 
   };
 }
 
+/* --------------------------- Run Restaurant Reputation Refresh  --------------------------- */
 
 async function runRestaurantReputationRefresh({
   restaurantCode,
@@ -3684,19 +3691,52 @@ async function runRestaurantReputationRefresh({
   const reviewsSnap = await db.ref(`${basePath}/reviews`).get();
   const reviewsObj = reviewsSnap.val() || {};
   const reviewsArr = Object.values(reviewsObj);
+
+  // ✅ FIX: load Uber Eats BEFORE using it
+  let uberEatsReviews = [];
+
+  try {
+    const uberSnap = await db
+      .ref(`restaurants/${restaurantCode}/reputation/ubereats/reviewsNormalized`)
+      .get();
+
+    const uberObj = uberSnap.val() || {};
+    uberEatsReviews = Object.values(uberObj);
+  } catch (err) {
+    console.error("Uber Eats RTDB read failed:", err.message || err);
+  }
+
+  // ✅ FIX: now safe to merge
+  const phase2Reviews = [
+    ...(reviewsArr || []),
+    ...(uberEatsReviews || []),
+  ];
+
   const voiceComplaints = await getRecentVoiceComplaintSignals(restaurantCode, { windowDays: 30 });
 
-const complaintTrends = buildRestaurantComplaintTrends({
-  reviewItems: (reviews || []).map((r) => ({
+  const googleReviewItems = (reviews || []).map((r) => ({
     text: r?.text || r?.snippet || r?.reviewText || "",
-  })),
-  callItems: (recentCalls || []).map((c) => ({
-    transcript: c?.transcript || c?.summary || "",
-  })),
-  messageItems: (recentMessages || []).map((m) => ({
-    message: m?.message || m?.text || "",
-  })),
-});
+  }));
+
+  const uberEatsReviewItems = (uberEatsReviews || []).map((r) => ({
+    text: r?.text || r?.originalText || "",
+  }));
+
+  const complaintTrends = buildRestaurantComplaintTrends({
+    reviewItems: [
+      ...googleReviewItems,
+      ...uberEatsReviewItems,
+    ],
+    callItems: (voiceComplaints || []).map((c) => ({
+      transcript:
+        c?.transcript ||
+        c?.summary ||
+        c?.text ||
+        c?.complaintText ||
+        "",
+    })),
+    messageItems: [],
+  });
 
   await db.ref(`${basePath}/meta`).update({
     ok: true,
@@ -3710,24 +3750,30 @@ const complaintTrends = buildRestaurantComplaintTrends({
     cutoffIso: new Date(cutoffMs).toISOString(),
     storedReviews,
     voiceComplaintCount30d: voiceComplaints.length,
+    uberEatsReviewCount: uberEatsReviews.length,
     googleTotalRatings: placeSignals?.userRatingsTotal || null,
     googleRating: placeSignals?.rating || null,
     note: "Restaurant reputation refresh (manual or scheduled)",
   });
 
-  const phase1Report = await buildRestaurantReputationPhase1Report({
-    restaurantCode,
-    restaurantDisplayName,
-    reviews: reviewsArr,
-    apiKey: apiKeyOpenAI,
-  });
+const phase1Reviews = [
+  ...(reviewsArr || []),
+  ...(uberEatsReviews || []),
+];
+
+const phase1Report = await buildRestaurantReputationPhase1Report({
+  restaurantCode,
+  restaurantDisplayName,
+  reviews: phase1Reviews,
+  apiKey: apiKeyOpenAI,
+});
 
   await db.ref(`restaurants/${restaurantCode}/insights/reputationPhase1`).set(phase1Report);
 
   const phase2Report = await buildRestaurantReputationPhase2Report({
     restaurantCode,
     restaurantDisplayName,
-    reviews: reviewsArr,
+    reviews: phase2Reviews,
     apiKey: apiKeyOpenAI,
     restaurantTimeZone,
   });
@@ -3759,14 +3805,34 @@ const complaintTrends = buildRestaurantComplaintTrends({
     storedReviews,
     risingThemes: phase2Report?.trend?.risingThemes?.length || 0,
     complaintTrendsSummary: {
-      totalSignals: complaintTrends?.totals?.all || 0,
-      voice: complaintTrends?.totals?.voice || 0,
-      reviews: complaintTrends?.totals?.reviews || 0,
-      topTag: complaintTrends?.topTags?.[0]?.tag || null,
+      totalSignals: complaintTrends?.totals?.matchedItems || 0,
+      voice: complaintTrends?.sources?.call || 0,
+      reviews: complaintTrends?.sources?.review || 0,
+      topTag: complaintTrends?.topTags?.[0]?.key || null,
       topTagCount: complaintTrends?.topTags?.[0]?.count || 0,
     },
   };
+}
 
+/*--------- GetREstaurantUberEasts config -----  */
+
+async function getRestaurantsWithUberEatsConfig() {
+  const snap = await admin.database().ref("restaurants").once("value");
+  const restaurants = snap.val() || {};
+
+  return Object.entries(restaurants)
+    .map(([restaurantCode, restaurantData]) => {
+      const reputationConfig = restaurantData?.config?.reputation || {};
+      return {
+        restaurantCode,
+        googlePlaceId: reputationConfig.googlePlaceId || null,
+        serpDataId: reputationConfig.serpDataId || null,
+        restaurantDisplayName: reputationConfig.restaurantDisplayName || null,
+        timeZone: reputationConfig.timeZone || null,
+        uberEatsStoreUrl: reputationConfig.uberEatsStoreUrl || null,
+      };
+    })
+    .filter((item) => !!item.uberEatsStoreUrl);
 }
 
 /* --------------------------- HTTPS: refreshRestaurantReputation --------------------------- */
@@ -4042,6 +4108,646 @@ exports.createRestaurantOnboarding = onRequest(
       
     } catch (err) {
       console.error("createRestaurantOnboarding error:", err);
+      return res.status(500).json({ ok: false, error: String(err?.message || err) });
+    }
+  }
+);
+
+exports.testUberEatsApifyFetch = onRequest(async (req, res) => {
+  try {
+    const restaurantCode = String(
+      req.query.restaurantCode || req.body?.restaurantCode || ""
+    ).trim();
+
+    if (!restaurantCode) {
+      return res.status(400).json({
+        ok: false,
+        error: "Missing restaurantCode",
+      });
+    }
+
+    const source = await getUberEatsSource(restaurantCode);
+
+    if (!source.ok) {
+      return res.status(400).json({
+        ok: false,
+        error: source.reason || "Unable to load Uber Eats source",
+      });
+    }
+
+    if (!source.enabled) {
+      return res.status(200).json({
+        ok: true,
+        restaurantCode,
+        enabled: false,
+        reason: source.reason || "Uber Eats source disabled",
+      });
+    }
+
+    const normalized = await getNormalizedUberEatsReviews(restaurantCode, {
+      maxReviews: 20,
+    });
+
+    return res.status(200).json({
+      ok: true,
+      restaurantCode,
+      enabled: true,
+      source: "uber_eats",
+      normalizedCount: normalized.length,
+      sample: normalized.slice(0, 3),
+    });
+  } catch (err) {
+    console.error("testUberEatsApifyFetch error:", err);
+    return res.status(500).json({
+      ok: false,
+      error: err.message || "Unknown error",
+    });
+  }
+});
+
+exports.syncUberEatsReviews = onSchedule(
+  {
+    schedule: "every day 04:00",
+    timeZone: "America/Toronto",
+    timeoutSeconds: 540,
+    memory: "1GiB",
+  },
+  async () => {
+    console.log("syncUberEatsReviews started");
+
+    const restaurants = await getRestaurantsWithUberEatsConfig();
+
+    console.log("syncUberEatsReviews found restaurants", {
+      count: restaurants.length,
+      restaurantCodes: restaurants.map((r) => r.restaurantCode),
+    });
+
+    for (const restaurant of restaurants) {
+      const restaurantCode = safeTrim(restaurant?.restaurantCode || "").toLowerCase();
+      if (!restaurantCode) continue;
+
+try {
+  const source = await getUberEatsSource(restaurantCode);
+
+  console.log("syncUberEatsReviews source check", {
+    restaurantCode,
+    ok: !!source?.ok,
+    enabled: !!source?.enabled,
+    reason: source?.reason || "",
+  });
+
+  if (!source?.ok || !source?.enabled) {
+    continue;
+  }
+
+  const runInfo = await fetchUberEatsReviews({
+    restaurantCode,
+    storeUrl: source.storeUrl,
+  });
+
+  console.log("syncUberEatsReviews Apify started", {
+    restaurantCode,
+    runId: runInfo?.runId || "",
+    datasetId: runInfo?.datasetId || "",
+    status: runInfo?.status || "",
+  });
+} catch (err) {
+
+        console.error("syncUberEatsReviews source check failed", {
+          restaurantCode,
+          error: String(err?.message || err),
+        });
+      }
+    }
+
+    return null;
+  }
+);
+
+async function runUberEatsSyncJob() {
+  console.log("syncUberEatsReviews started");
+
+  const restaurants = await getRestaurantsWithUberEatsConfig();
+
+  console.log("syncUberEatsReviews found restaurants", {
+    count: restaurants.length,
+    restaurantCodes: restaurants.map((r) => r.restaurantCode),
+  });
+
+  for (const restaurant of restaurants) {
+    const restaurantCode = safeTrim(restaurant?.restaurantCode || "").toLowerCase();
+    if (!restaurantCode) continue;
+
+    try {
+      const source = await getUberEatsSource(restaurantCode);
+
+      console.log("syncUberEatsReviews source check", {
+        restaurantCode,
+        ok: !!source?.ok,
+        enabled: !!source?.enabled,
+        reason: source?.reason || "",
+      });
+
+      if (!source?.ok || !source?.enabled) {
+        continue;
+      }
+
+      const runInfo = await fetchUberEatsReviews({
+        restaurantCode,
+        storeUrl: source.storeUrl,
+      });
+
+      console.log("syncUberEatsReviews Apify started", {
+        restaurantCode,
+        runId: runInfo?.runId || "",
+        datasetId: runInfo?.datasetId || "",
+        status: runInfo?.status || "",
+      });
+
+      const nowMs = Date.now();
+
+      await db.ref(`restaurants/${restaurantCode}/reputation/ubereats/pendingRun`).set({
+        ok: true,
+        restaurantCode,
+        runId: runInfo?.runId || "",
+        datasetId: runInfo?.datasetId || "",
+        status: runInfo?.status || "",
+        startedAtMs: nowMs,
+        startedAtIso: new Date(nowMs).toISOString(),
+        ingested: false,
+      });
+
+      console.log("syncUberEatsReviews pending run stored", {
+        restaurantCode,
+        runId: runInfo?.runId || "",
+        datasetId: runInfo?.datasetId || "",
+      });
+    } catch (err) {
+      console.error("syncUberEatsReviews failed", {
+        restaurantCode,
+        error: String(err?.message || err),
+      });
+    }
+  }
+
+  return null;
+}
+
+/*----------run uber eats Sync Now Job ---------*/
+
+exports.runUberEatsSyncNow = onRequest(
+  {
+    region: "us-central1",
+    timeoutSeconds: 540,
+    memory: "1GiB",
+  },
+  async (req, res) => {
+    setCors(res);
+    if (req.method === "OPTIONS") return res.status(204).send("");
+
+    try {
+      console.log("runUberEatsSyncNow started");
+
+      const restaurants = await getRestaurantsWithUberEatsConfig();
+
+      console.log("runUberEatsSyncNow found restaurants", {
+        count: restaurants.length,
+        restaurantCodes: restaurants.map((r) => r.restaurantCode),
+      });
+
+      for (const restaurant of restaurants) {
+        const restaurantCode = safeTrim(restaurant?.restaurantCode || "").toLowerCase();
+        if (!restaurantCode) continue;
+
+        try {
+          const source = await getUberEatsSource(restaurantCode);
+
+          console.log("runUberEatsSyncNow source check", {
+            restaurantCode,
+            ok: !!source?.ok,
+            enabled: !!source?.enabled,
+            reason: source?.reason || "",
+          });
+
+          if (!source?.ok || !source?.enabled) {
+            continue;
+          }
+
+          const runInfo = await fetchUberEatsReviews({
+            restaurantCode,
+            storeUrl: source.storeUrl,
+          });
+
+          console.log("runUberEatsSyncNow Apify started", {
+            restaurantCode,
+            runId: runInfo?.runId || "",
+            datasetId: runInfo?.datasetId || "",
+            status: runInfo?.status || "",
+          });
+
+          const nowMs = Date.now();
+
+          await db.ref(`restaurants/${restaurantCode}/reputation/ubereats/pendingRun`).set({
+            ok: true,
+            restaurantCode,
+            runId: runInfo?.runId || "",
+            datasetId: runInfo?.datasetId || "",
+            status: runInfo?.status || "",
+            startedAtMs: nowMs,
+            startedAtIso: new Date(nowMs).toISOString(),
+            ingested: false,
+          });
+
+          console.log("runUberEatsSyncNow pending run stored", {
+            restaurantCode,
+            runId: runInfo?.runId || "",
+            datasetId: runInfo?.datasetId || "",
+          });
+        } catch (err) {
+          console.error("runUberEatsSyncNow failed", {
+            restaurantCode,
+            error: String(err?.message || err),
+          });
+        }
+      }
+
+      return res.json({ ok: true });
+    } catch (err) {
+      console.error("runUberEatsSyncNow error:", err);
+      return res.status(500).json({ ok: false, error: String(err?.message || err) });
+    }
+  }
+);
+
+/* -------------------- Ingest Uber Eats Reviews On Scehdule ------------------*/
+
+exports.ingestUberEatsReviews = onSchedule(
+  {
+    schedule: "every day 04:20",
+    timeZone: "America/Toronto",
+    timeoutSeconds: 540,
+    memory: "1GiB",
+  },
+  async () => {
+    console.log("ingestUberEatsReviews started");
+
+    const restaurants = await getRestaurantsWithUberEatsConfig();
+
+    console.log("ingestUberEatsReviews found restaurants", {
+      count: restaurants.length,
+      restaurantCodes: restaurants.map((r) => r.restaurantCode),
+    });
+
+    for (const restaurant of restaurants) {
+      const restaurantCode = safeTrim(restaurant?.restaurantCode || "").toLowerCase();
+      if (!restaurantCode) continue;
+
+      try {
+        const pendingSnap = await db
+          .ref(`restaurants/${restaurantCode}/reputation/ubereats/pendingRun`)
+          .get();
+
+        const pending = pendingSnap.val() || {};
+        const runId = safeTrim(pending?.runId || "");
+        const datasetIdFromPending = safeTrim(pending?.datasetId || "");
+        const alreadyIngested = pending?.ingested === true;
+
+        if (!runId || alreadyIngested) {
+          continue;
+        }
+
+        const finalRun = await waitForApifyRun(runId, {
+          pollMs: 5000,
+          timeoutMs: 60000,
+        });
+
+        const finalStatus = safeTrim(finalRun?.status || pending?.status || "");
+        const datasetId = safeTrim(finalRun?.defaultDatasetId || datasetIdFromPending || "");
+
+        console.log("ingestUberEatsReviews run check", {
+          restaurantCode,
+          runId,
+          datasetId,
+          status: finalStatus,
+        });
+
+        if (!datasetId) {
+          await db.ref(`restaurants/${restaurantCode}/reputation/ubereats/pendingRun`).update({
+            status: finalStatus || "UNKNOWN",
+            lastCheckedAtMs: Date.now(),
+            ingested: false,
+            error: "Missing datasetId after run check",
+          });
+          continue;
+        }
+
+const items = await getApifyDatasetItems(datasetId);
+const safeItems = Array.isArray(items) ? items : [];
+const nowMs = Date.now();
+
+await db.ref(`restaurants/${restaurantCode}/reputation/ubereats/reviews`).set(null);
+await db.ref(`restaurants/${restaurantCode}/reputation/ubereats/reviewsNormalized`).set(null);
+
+const updates = {};
+
+safeItems.forEach((item, index) => {
+  const rawKey = sanitizeDbKey(
+    item?.reviewId || item?.id || `${restaurantCode}_ubereats_${index}_${nowMs}`
+  );
+
+  updates[`restaurants/${restaurantCode}/reputation/ubereats/reviews/${rawKey}`] = {
+    ...item,
+    source: "ubereats",
+    fetchedAtMs: nowMs,
+  };
+
+  const text =
+    safeTrim(item?.text) ||
+    safeTrim(item?.reviewText) ||
+    safeTrim(item?.content) ||
+    "";
+
+  const authorName =
+    safeTrim(item?.authorName) ||
+    safeTrim(item?.author) ||
+    safeTrim(item?.userName) ||
+    "";
+
+  const ratingRaw = item?.rating;
+  const rating =
+    typeof ratingRaw === "number"
+      ? ratingRaw
+      : Number.isFinite(Number(ratingRaw))
+      ? Number(ratingRaw)
+      : null;
+
+  const isoCandidate =
+    safeTrim(item?.isoDate) ||
+    safeTrim(item?.date) ||
+    safeTrim(item?.publishedAt) ||
+    safeTrim(item?.createdAt) ||
+    "";
+
+  const parsedMs = toMsFromIso(isoCandidate);
+  const dateMs = parsedMs || nowMs;
+  const isoDate = parsedMs ? new Date(parsedMs).toISOString() : "";
+
+  const normalizedKey = sanitizeDbKey(
+    `ubereats_${item?.reviewId || item?.id || index}_${dateMs}`
+  );
+
+  updates[`restaurants/${restaurantCode}/reputation/ubereats/reviewsNormalized/${normalizedKey}`] = {
+    reviewId: normalizedKey,
+    source: "ubereats",
+    authorName,
+    rating,
+    text,
+    dateMs,
+    isoDate,
+    fetchedAtMs: nowMs,
+    rawReviewKey: rawKey,
+  };
+});
+
+updates[`restaurants/${restaurantCode}/reputation/ubereats/meta`] = {
+  ok: true,
+  restaurantCode,
+  runId,
+  datasetId,
+  itemCount: safeItems.length,
+  normalizedItemCount: safeItems.length,
+  fetchedAtMs: nowMs,
+  fetchedAtIso: new Date(nowMs).toISOString(),
+  note: "Raw and normalized Uber Eats dataset items stored from Apify ingestion job",
+};
+
+        updates[`restaurants/${restaurantCode}/reputation/ubereats/pendingRun`] = {
+          ...(pending || {}),
+          runId,
+          datasetId,
+          status: finalStatus || "SUCCEEDED",
+          lastCheckedAtMs: nowMs,
+          ingested: true,
+          ingestedAtMs: nowMs,
+          ingestedAtIso: new Date(nowMs).toISOString(),
+          itemCount: safeItems.length,
+        };
+
+        await db.ref().update(updates);
+
+        console.log("ingestUberEatsReviews write complete", {
+          restaurantCode,
+          datasetId,
+          itemCount: safeItems.length,
+        });
+      } catch (err) {
+        console.error("ingestUberEatsReviews failed", {
+          restaurantCode,
+          error: String(err?.message || err),
+        });
+      }
+    }
+
+    return null;
+  }
+);
+
+/* -------------------- Ingest Uber Eats Reviews Now ------------------*/
+
+exports.runUberEatsIngestNow = onRequest(
+  {
+    region: "us-central1",
+    timeoutSeconds: 540,
+    memory: "1GiB",
+  },
+  async (req, res) => {
+    setCors(res);
+    if (req.method === "OPTIONS") return res.status(204).send("");
+
+    try {
+      console.log("runUberEatsIngestNow started");
+      console.log("runUberEatsIngestNow before getRestaurantsWithUberEatsConfig");
+
+      const restaurants = await getRestaurantsWithUberEatsConfig();
+
+      console.log("runUberEatsIngestNow after getRestaurantsWithUberEatsConfig");
+      console.log("runUberEatsIngestNow found restaurants", {
+        count: restaurants.length,
+        restaurantCodes: restaurants.map((r) => r.restaurantCode),
+      });
+
+      for (const restaurant of restaurants) {
+        const restaurantCode = safeTrim(restaurant?.restaurantCode || "").toLowerCase();
+        if (!restaurantCode) continue;
+
+        console.log("runUberEatsIngestNow entered restaurant loop", {
+          restaurantCode,
+        });
+
+        try {
+          console.log("runUberEatsIngestNow reading pendingRun", {
+            restaurantCode,
+          });
+
+          const pendingSnap = await db
+            .ref(`restaurants/${restaurantCode}/reputation/ubereats/pendingRun`)
+            .get();
+
+          const pending = pendingSnap.val() || {};
+          const runId = safeTrim(pending?.runId || "");
+          const datasetIdFromPending = safeTrim(pending?.datasetId || "");
+          const alreadyIngested = pending?.ingested === true;
+
+          console.log("runUberEatsIngestNow pendingRun loaded", {
+            restaurantCode,
+            runId,
+            datasetId: datasetIdFromPending,
+            alreadyIngested,
+          });
+
+          if (!runId || alreadyIngested) {
+            console.log("runUberEatsIngestNow skipping restaurant", {
+              restaurantCode,
+              reason: !runId ? "missing_runId" : "already_ingested",
+            });
+            continue;
+          }
+
+          const finalRun = await waitForApifyRun(runId, {
+            pollMs: 5000,
+            timeoutMs: 60000,
+          });
+
+          const finalStatus = safeTrim(finalRun?.status || pending?.status || "");
+          const datasetId = safeTrim(finalRun?.defaultDatasetId || datasetIdFromPending || "");
+
+          console.log("runUberEatsIngestNow run check", {
+            restaurantCode,
+            runId,
+            datasetId,
+            status: finalStatus,
+          });
+
+          if (!datasetId) {
+            await db.ref(`restaurants/${restaurantCode}/reputation/ubereats/pendingRun`).update({
+              status: finalStatus || "UNKNOWN",
+              lastCheckedAtMs: Date.now(),
+              ingested: false,
+              error: "Missing datasetId after run check",
+            });
+            continue;
+          }
+
+          const items = await getApifyDatasetItems(datasetId);
+          const safeItems = Array.isArray(items) ? items : [];
+          const nowMs = Date.now();
+
+          await db.ref(`restaurants/${restaurantCode}/reputation/ubereats/reviews`).set(null);
+          await db.ref(`restaurants/${restaurantCode}/reputation/ubereats/reviewsNormalized`).set(null);
+
+          const updates = {};
+
+          safeItems.forEach((item, index) => {
+          const rawKey = sanitizeDbKey(
+          item?.reviewId || item?.id || `${restaurantCode}_ubereats_${index}_${nowMs}`
+        );
+
+  updates[`restaurants/${restaurantCode}/reputation/ubereats/reviews/${rawKey}`] = {
+    ...item,
+    source: "ubereats",
+    fetchedAtMs: nowMs,
+  };
+
+  const text =
+    safeTrim(item?.text) ||
+    safeTrim(item?.reviewText) ||
+    safeTrim(item?.content) ||
+    "";
+
+  const authorName =
+    safeTrim(item?.authorName) ||
+    safeTrim(item?.author) ||
+    safeTrim(item?.userName) ||
+    "";
+
+  const ratingRaw = item?.rating;
+  const rating =
+    typeof ratingRaw === "number"
+      ? ratingRaw
+      : Number.isFinite(Number(ratingRaw))
+      ? Number(ratingRaw)
+      : null;
+
+  const isoCandidate =
+    safeTrim(item?.isoDate) ||
+    safeTrim(item?.date) ||
+    safeTrim(item?.publishedAt) ||
+    safeTrim(item?.createdAt) ||
+    "";
+
+  const parsedMs = toMsFromIso(isoCandidate);
+  const dateMs = parsedMs || nowMs;
+  const isoDate = parsedMs ? new Date(parsedMs).toISOString() : "";
+
+  const normalizedKey = sanitizeDbKey(
+    `ubereats_${item?.reviewId || item?.id || index}_${dateMs}`
+  );
+
+          updates[`restaurants/${restaurantCode}/reputation/ubereats/reviewsNormalized/${normalizedKey}`] = {
+            reviewId: normalizedKey,
+            source: "ubereats",
+            authorName,
+            rating,
+            text,
+            dateMs,
+            isoDate,
+            fetchedAtMs: nowMs,
+            rawReviewKey: rawKey,
+          };
+});
+
+          updates[`restaurants/${restaurantCode}/reputation/ubereats/meta`] = {
+            ok: true,
+            restaurantCode,
+            runId,
+            datasetId,
+            itemCount: safeItems.length,
+            normalizedItemCount: safeItems.length,
+            fetchedAtMs: nowMs,
+            fetchedAtIso: new Date(nowMs).toISOString(),
+            note: "Raw and normalized Uber Eats dataset items stored from Apify ingestion job",
+          };
+
+          updates[`restaurants/${restaurantCode}/reputation/ubereats/pendingRun`] = {
+            ...(pending || {}),
+            runId,
+            datasetId,
+            status: finalStatus || "SUCCEEDED",
+            lastCheckedAtMs: nowMs,
+            ingested: true,
+            ingestedAtMs: nowMs,
+            ingestedAtIso: new Date(nowMs).toISOString(),
+            itemCount: safeItems.length,
+          };
+
+          await db.ref().update(updates);
+
+          console.log("runUberEatsIngestNow write complete", {
+            restaurantCode,
+            datasetId,
+            itemCount: safeItems.length,
+          });
+        } catch (err) {
+          console.error("runUberEatsIngestNow failed", {
+            restaurantCode,
+            error: String(err?.message || err),
+          });
+        }
+      }
+
+      return res.json({ ok: true });
+    } catch (err) {
+      console.error("runUberEatsIngestNow error:", err);
       return res.status(500).json({ ok: false, error: String(err?.message || err) });
     }
   }

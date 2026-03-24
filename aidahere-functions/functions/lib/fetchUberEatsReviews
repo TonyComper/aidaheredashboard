@@ -1,0 +1,56 @@
+// functions/lib/fetchUberEatsReviews.js
+
+async function fetchUberEatsReviews({ storeUrl, maxReviews = 5 }) {
+  if (!storeUrl) {
+    throw new Error("Missing storeUrl");
+  }
+
+  const token = process.env.APIFY_TOKEN;
+  const taskId = process.env.APIFY_UBER_TASK_ID;
+
+  if (!token) {
+    throw new Error("Missing APIFY_TOKEN in functions/.env");
+  }
+
+  if (!taskId) {
+    throw new Error("Missing APIFY_UBER_TASK_ID in functions/.env");
+  }
+
+  const startUrl =
+    `https://api.apify.com/v2/actor-tasks/${encodeURIComponent(taskId)}` +
+    `/runs?token=${encodeURIComponent(token)}`;
+
+  const input = {
+    startUrls: [{ url: storeUrl }],
+    maxReviews,
+  };
+
+  const response = await fetch(startUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(input),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(
+      `Apify start run failed: ${response.status} ${response.statusText} - ${text}`
+    );
+  }
+
+  const data = await response.json();
+  const runData = data?.data || {};
+
+  return {
+    runId: runData.id || null,
+    datasetId: runData.defaultDatasetId || null,
+    status: runData.status || null,
+    raw: runData,
+  };
+}
+
+module.exports = {
+  fetchUberEatsReviews,
+};
