@@ -2425,6 +2425,8 @@ const RESTAURANT_THEME_META = {
   menu_availability_stock: { title: "Menu availability / stock issues", bucket: "ops" },
 };
 
+/*  get recent voice complaints for vapi */
+
 async function getRecentVoiceComplaintSignals(restaurantCode, { windowDays = 30 } = {}) {
   const nowMs = Date.now();
   const cutoffMs = nowMs - windowDays * 24 * 60 * 60 * 1000;
@@ -4044,14 +4046,23 @@ exports.createRestaurantOnboarding = onRequest(
 
       const firestore = admin.firestore();
 
-      await firestore.collection("users").doc(userDocId).set(
-        {
-          assistantId,
-          restaurantCode,
-          restaurantName,
-        },
-        { merge: true }
-      );
+await firestore.collection("users").doc(userDocId).set(
+  {
+    assistantId,
+    restaurantCode,
+    restaurantName,
+    contactPhoneNumber: safeTrim(req.body?.contactPhoneNumber || ""),
+    email: safeTrim(req.body?.email || ""),
+    name: safeTrim(req.body?.name || ""),
+    password: safeTrim(req.body?.password || ""),
+    planName: safeTrim(req.body?.planName || ""),
+    planMonthlyCalls: Number(req.body?.planMonthlyCalls || 0),
+    planMonthlyFee: Number(req.body?.planMonthlyFee || 0),
+    planOverageFee: Number(req.body?.planOverageFee || 0),
+    planStartMonth: safeTrim(req.body?.planStartMonth || ""),
+  },
+  { merge: true }
+);
 
       await db.ref(`restaurants/${restaurantCode}/config`).update({
         assistantId,
@@ -4087,11 +4098,7 @@ exports.createRestaurantOnboarding = onRequest(
 
       const apiKeyOpenAI = OPENAI_API_KEY.value();
 
-      const refreshResult = await runRestaurantReputationRefresh({
-        restaurantCode,
-        apiKeySerp: SERPAPI_API_KEY.value(),
-        apiKeyOpenAI,
-      });
+      const refreshResult = { skipped: true, reason: "post-onboarding refresh deferred" };
 
       return res.json({
         ok: true,
